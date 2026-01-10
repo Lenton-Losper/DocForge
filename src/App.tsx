@@ -1,63 +1,66 @@
-import { useState } from 'react';
-import Navigation from './components/Navigation';
-import Hero from './components/Hero';
-import Preview from './components/Preview';
-import Features from './components/Features';
-import WorkflowDiagram from './components/WorkflowDiagram';
+/** Main App component with routing. */
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { ProtectedRoute } from './components/ProtectedRoute';
+import { PublicRoute } from './components/PublicRoute';
+import Landing from './pages/Landing';
+import Dashboard from './pages/Dashboard';
+import Projects from './pages/Projects';
+import ProjectDetail from './pages/ProjectDetail';
+import Settings from './pages/Settings';
 
 function App() {
-  const [documentUploaded, setDocumentUploaded] = useState(false);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [uploadedFileName, setUploadedFileName] = useState('');
-
-  const handleFileUpload = (file: File) => {
-    // Validate file type
-    const allowedTypes = ['.pdf', '.docx', '.doc', '.md'];
-    const fileExtension = '.' + file.name.split('.').pop()?.toLowerCase();
-    
-    if (!allowedTypes.includes(fileExtension)) {
-      alert('Please upload a valid file type: PDF, DOCX, DOC, or MD');
-      return;
-    }
-
-    // Set analyzing state
-    setIsAnalyzing(true);
-    setUploadedFileName(file.name);
-
-    // Simulate processing (2 seconds)
-    setTimeout(() => {
-      setIsAnalyzing(false);
-      setDocumentUploaded(true);
-
-      // Smooth scroll to preview section
-      setTimeout(() => {
-        const previewSection = document.getElementById('preview');
-        if (previewSection) {
-          previewSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        }
-      }, 100);
-    }, 2000);
-  };
-
   return (
-    <div className="min-h-screen bg-white">
-      <Navigation />
-      <main>
-        <Hero 
-          onFileUpload={handleFileUpload}
-          isAnalyzing={isAnalyzing}
+    <BrowserRouter>
+      <Routes>
+        {/* Public routes - redirect to dashboard if authenticated */}
+        <Route
+          path="/"
+          element={
+            <PublicRoute>
+              <Landing />
+            </PublicRoute>
+          }
         />
-        <Preview 
-          documentUploaded={documentUploaded}
-          isAnalyzing={isAnalyzing}
-          uploadedFileName={uploadedFileName}
+
+        {/* Protected routes - redirect to home if not authenticated */}
+        <Route
+          path="/dashboard"
+          element={
+            <ProtectedRoute>
+              <Dashboard />
+            </ProtectedRoute>
+          }
         />
-        <Features />
-        <WorkflowDiagram />
-      </main>
-    </div>
+        <Route
+          path="/projects"
+          element={
+            <ProtectedRoute>
+              <Projects />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/projects/:id"
+          element={
+            <ProtectedRoute>
+              <ProjectDetail />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/settings"
+          element={
+            <ProtectedRoute>
+              <Settings />
+            </ProtectedRoute>
+          }
+        />
+
+        {/* Catch all - redirect to home */}
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </BrowserRouter>
   );
 }
 
 export default App;
-

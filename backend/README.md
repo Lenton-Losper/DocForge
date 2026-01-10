@@ -1,140 +1,201 @@
-# DocForge Backend API
+# DocDocs Backend
 
-FastAPI backend for AI-powered documentation linting.
+Automated repository analyzer backend - Phase 1 & Phase 2.
+
+## Overview
+
+DocDocs analyzes Git repositories to extract:
+- **Services**: Classes with service patterns
+- **APIs**: REST endpoints (Express/Fastify routes)
+- **Roles**: Role strings and patterns
+- **Dependencies**: File-to-file import graph
+- **Files**: Change frequency analysis
+
+**Phase 1**: Repository analysis and knowledge graph building  
+**Phase 2**: Documentation validation, LLM-powered fixes, and documentation generation
+
+## Supabase Integration
+
+The backend is now connected to Supabase for:
+- ✅ JWT authentication verification
+- ✅ Document storage (Supabase Storage)
+- ✅ Database storage (PostgreSQL via Supabase)
+- ✅ User-specific data isolation
+
+See `SUPABASE_BACKEND_SETUP.md` for setup instructions.
 
 ## Architecture
 
 ```
-backend/
-├── main.py                 # FastAPI app entry point
-├── api/
-│   ├── analyze.py          # Document upload + analysis endpoint
-│   └── suggest_fixes.py    # AI fix suggestions (Phase 2)
-├── parsing/
-│   ├── docx_parser.py      # DOCX file parser
-│   └── pdf_parser.py       # PDF file parser
-├── models/
-│   ├── document_model.py   # Normalized document structure
-│   └── issue_model.py      # Lint issues and reports
-├── rules/
-│   ├── required_sections.py # Required section checks
-│   ├── image_rules.py      # Image caption validation
-│   ├── heading_rules.py    # Heading structure checks
-│   └── scoring.py          # Quality scoring system
-└── ai/
-    └── fixer.py            # AI fix engine (Phase 2, disabled by default)
+backend/src/
+├── server.ts              # Server entry point
+├── app.ts                 # Express app setup
+├── config/
+│   └── supabase.ts        # Supabase client (service_role)
+├── middleware/
+│   └── auth.ts            # JWT verification middleware
+├── routes/
+│   ├── analyze.route.ts   # Analysis routes (public)
+│   ├── doc.route.ts       # Documentation routes (public)
+│   ├── documents.route.ts # Document routes (protected)
+│   └── repositories.route.ts # Repository routes (protected)
+├── controllers/
+│   ├── analyze.controller.ts
+│   ├── doc.controller.ts
+│   ├── documents.controller.ts  # Document management
+│   └── repositories.controller.ts # Repository management
+├── services/
+│   ├── repo.service.ts        # Git repository analysis
+│   ├── ast.service.ts         # TypeScript AST parsing (ts-morph)
+│   ├── dependency.service.ts  # Dependency graph builder
+│   ├── api-extractor.service.ts # REST API detection
+│   ├── role-detector.service.ts # Role pattern detection
+│   ├── analyze.service.ts     # Main orchestration
+│   ├── rules.service.ts       # Rules engine (Phase 2)
+│   ├── llm-fix.service.ts     # LLM fix engine (Phase 2)
+│   └── doc-generator.service.ts # Documentation generator (Phase 2)
+├── graph/
+│   └── knowledge-graph.ts     # Entity-relationship graph
+├── types/
+│   ├── analysis.types.ts     # TypeScript definitions
+│   └── rules.types.ts        # Rules engine types (Phase 2)
+└── utils/
+    └── file.utils.ts          # File utilities
 ```
 
 ## Setup
 
-1. Create virtual environment:
+1. **Install dependencies:**
 ```bash
-python -m venv .venv
+npm install
 ```
 
-2. Activate virtual environment:
-```bash
-# Windows
-.venv\Scripts\activate
-
-# Linux/Mac
-source .venv/bin/activate
+2. **Create `.env` file:**
+```env
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+PORT=8000
 ```
 
-3. Install dependencies:
+3. **Set up database:**
+   - Run `DATABASE_SCHEMA.sql` in Supabase SQL Editor
+   - Create `documents` storage bucket in Supabase
+
+4. **Build TypeScript:**
 ```bash
-pip install -r requirements.txt
+npm run build
 ```
 
-4. Run development server:
+5. **Run development server:**
 ```bash
-uvicorn main:app --reload --port 8000
+npm run dev
 ```
 
-API will be available at `http://localhost:8000`
+6. **Run production server:**
+```bash
+npm start
+```
 
 ## API Endpoints
 
-### POST `/api/analyze`
-Upload and analyze a documentation file.
+### Public Endpoints (No Auth Required)
+
+#### POST `/api/analyze`
+Analyze a Git repository.
+
+#### POST `/api/validate-docs`
+Validate documentation completeness.
+
+#### POST `/api/generate-docs`
+Generate documentation from analysis.
+
+### Protected Endpoints (Require JWT Token)
+
+#### POST `/api/documents/upload`
+Upload a document to Supabase Storage.
+
+**Headers:**
+```
+Authorization: Bearer <jwt-token>
+```
 
 **Request:**
-- `file`: Multipart file upload (.docx, .pdf, .doc, .md)
+- FormData with file and metadata
 
 **Response:**
 ```json
 {
-  "score": 68,
-  "summary": {
-    "errors": 4,
-    "warnings": 12
-  },
-  "issues": [
-    {
-      "id": "MISSING_SECTION_INTRODUCTION",
-      "severity": "ERROR",
-      "message": "Missing required section: Introduction",
-      "page": null,
-      "penalty": 15
-    }
-  ]
+  "success": true,
+  "document": { ... },
+  "message": "Document uploaded successfully"
 }
 ```
 
-### POST `/api/suggest-fixes`
-Generate AI-powered fix suggestions (Phase 2, disabled by default).
+#### GET `/api/documents`
+Get all user's documents.
+
+#### GET `/api/documents/:id`
+Get specific document.
+
+#### DELETE `/api/documents/:id`
+Delete a document.
+
+#### POST `/api/repositories/connect`
+Connect a GitHub repository.
 
 **Request:**
 ```json
 {
-  "issues": [...],
-  "document": {...}
+  "repo_url": "https://github.com/user/repo",
+  "github_token": "optional-token"
 }
 ```
 
-**Query Parameters:**
-- `enabled`: boolean (default: false) - Enable AI fix generation
+#### GET `/api/repositories`
+Get all user's repositories.
 
-**Response:**
-```json
-{
-  "suggestions": [
-    {
-      "issue_id": "...",
-      "original": "",
-      "suggested": "### Safety Warnings\n...",
-      "confidence": 0.92
-    }
-  ]
-}
+## Frontend Integration
+
+Use the API client in `src/lib/api.ts`:
+
+```typescript
+import { uploadDocument, getDocuments, connectRepository } from './lib/api';
+
+// Upload document
+const result = await uploadDocument(file);
+
+// Get documents
+const { documents } = await getDocuments();
+
+// Connect repository
+const { repository } = await connectRepository('https://github.com/user/repo');
 ```
 
-## Phase 1 Features (Implemented)
+## Tech Stack
 
-- ✅ DOCX and PDF parsing
-- ✅ Document structure normalization
-- ✅ Required section validation
-- ✅ Image caption checking
-- ✅ Heading sequence validation
-- ✅ Quality scoring (0-100)
-
-## Phase 2 Features (Scaffolded)
-
-- ⚠️ AI fix engine (placeholder, requires LLM integration)
-- ⚠️ Fix suggestions endpoint (disabled by default)
+- **Node.js** + **TypeScript**
+- **Express** for REST API
+- **Supabase** for auth, database, and storage
+- **ts-morph** for TypeScript AST parsing
+- **simple-git** for Git repository access
 
 ## Development
 
-The backend uses:
-- **FastAPI** for REST API
-- **python-docx** for DOCX parsing
-- **pdfplumber** for PDF parsing
-- **Pydantic** for data validation
+```bash
+# Development with hot reload
+npm run dev
+
+# Build for production
+npm run build
+
+# Lint code
+npm run lint
+```
 
 ## CORS
 
-CORS is configured for frontend integration on:
-- `http://localhost:5173` (Vite default)
-- `http://localhost:3000` (React default)
+CORS is configured for:
+- `http://localhost:5173` (Vite)
+- `http://localhost:3000` (React)
 
-Update `main.py` to add additional origins.
+Update `src/app.ts` to add additional origins.

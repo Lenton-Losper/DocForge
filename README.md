@@ -1,6 +1,38 @@
-# DocForge Landing Page
+# DocDocs
 
-A modern SaaS landing page for DocForge - an AI-powered documentation linting tool.
+A modern SaaS platform for AI-powered documentation analysis and generation.
+
+## 🚀 Quick Start
+
+### Install Dependencies
+
+```bash
+# Install all dependencies (frontend + backend)
+npm run install:all
+```
+
+Or separately:
+```bash
+npm install              # Frontend
+cd backend && npm install # Backend
+```
+
+### Run Development Servers
+
+**Terminal 1 - Backend:**
+```bash
+cd backend
+npm run dev
+```
+Backend: http://localhost:8000
+
+**Terminal 2 - Frontend:**
+```bash
+npm run dev
+```
+Frontend: http://localhost:5173
+
+See `QUICKSTART.md` or `RUN.md` for detailed instructions.
 
 ## Tech Stack
 
@@ -40,7 +72,7 @@ The built files will be in the `dist` directory.
 ## Project Structure
 
 ```
-DocForge/
+DocDocs/
 ├── src/
 │   ├── components/
 │   │   ├── Navigation.tsx      # Sticky navigation bar

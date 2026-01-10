@@ -7,8 +7,9 @@ export default {
   theme: {
     extend: {
       colors: {
-        'navy': '#1a2332',
-        'primary-blue': '#2563eb',
+        // Black & White Design System
+        'primary': '#000000',
+        'primary-blue': '#000000', // Keep for backward compatibility, but use black
       },
     },
   },

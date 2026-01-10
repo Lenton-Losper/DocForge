@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   FileText,
   Network,
@@ -29,23 +29,25 @@ const WorkflowDiagram = () => {
     };
   }, [isOpen]);
 
+  // Expose trigger function globally for WorkflowSection
+  useEffect(() => {
+    (window as any).openWorkflowDiagram = () => setIsOpen(true);
+    return () => {
+      delete (window as any).openWorkflowDiagram;
+    };
+  }, []);
+
   return (
     <>
-      {/* Trigger Section */}
-      <section className="py-20 px-4 sm:px-6 lg:px-8 bg-gray-50">
-        <div className="max-w-4xl mx-auto text-center">
-          <h2 className="text-3xl sm:text-4xl font-bold text-gray-900 mb-8">
-            How DocForge Works
-          </h2>
-          <button
-            onClick={() => setIsOpen(true)}
-            className="bg-primary-blue text-white px-8 py-4 rounded-lg font-semibold text-lg hover:bg-blue-600 transition-all duration-200 hover:scale-105 hover:shadow-xl cursor-pointer"
-            aria-label="View workflow diagram"
-          >
-            View Workflow Diagram
-          </button>
-        </div>
-      </section>
+      {/* Hidden trigger button for WorkflowSection */}
+      <button
+        onClick={() => setIsOpen(true)}
+        data-workflow-trigger
+        className="hidden"
+        aria-label="View workflow diagram"
+      >
+        View Workflow Diagram
+      </button>
 
       {/* Modal Overlay */}
       {isOpen && (
@@ -60,7 +62,7 @@ const WorkflowDiagram = () => {
           >
             <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between z-10">
               <h2 className="text-3xl sm:text-4xl font-bold text-gray-900">
-                DocForge AI Documentation Workflow
+                DocDocs AI Documentation Workflow
               </h2>
               <button
                 onClick={() => setIsOpen(false)}

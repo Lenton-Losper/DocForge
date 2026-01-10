@@ -1,14 +1,13 @@
 import { useRef } from 'react';
-import { Upload, Check, Loader2 } from 'lucide-react';
+import { Upload, Github, Check, Loader2 } from 'lucide-react';
 
 interface HeroProps {
-  onFileUpload: (file: File) => void;
-  isAnalyzing: boolean;
+  onUploadClick: () => void;
+  onGitHubClick: () => void;
+  isAnalyzing?: boolean;
 }
 
-const Hero = ({ onFileUpload, isAnalyzing }: HeroProps) => {
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
+const Hero = ({ onUploadClick, onGitHubClick, isAnalyzing = false }: HeroProps) => {
   const scrollToPreview = () => {
     const previewSection = document.getElementById('preview');
     if (previewSection) {
@@ -16,54 +15,29 @@ const Hero = ({ onFileUpload, isAnalyzing }: HeroProps) => {
     }
   };
 
-  const handleUploadClick = () => {
-    fileInputRef.current?.click();
-  };
-
-  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (file) {
-      onFileUpload(file);
-    }
-    // Reset input so same file can be selected again
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
-    }
-  };
-
   return (
-    <section className="pt-32 pb-20 px-4 sm:px-6 lg:px-8 bg-white">
-      <div className="max-w-4xl mx-auto text-center">
-        {/* Main Heading */}
-        <h1 className="text-4xl sm:text-5xl md:text-6xl font-bold text-gray-900 mb-6">
+    <section className="min-h-screen flex items-center bg-[#FAFAF9]">
+      <div className="max-w-6xl mx-auto px-8 py-24 w-full">
+        {/* Massive Headline */}
+        <h1 className="text-5xl sm:text-6xl md:text-7xl font-bold text-[#1C1917] mb-6 leading-tight">
           Your boss sent it back. Again.
         </h1>
 
-        {/* Subheading */}
-        <p className="text-lg sm:text-xl text-gray-600 mb-10 max-w-3xl mx-auto">
+        {/* Large Subheading */}
+        <p className="text-xl text-[#57534E] mb-12 max-w-3xl leading-relaxed">
           AI-powered documentation linting catches gaps, inconsistencies, and role mismatches before your manager does. Upload your manual, get instant fixes.
         </p>
 
-        {/* Hidden File Input */}
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept=".pdf,.docx,.doc,.md"
-          onChange={handleFileChange}
-          className="hidden"
-          aria-label="File upload input"
-        />
-
-        {/* CTA Button */}
-        <div className="mb-8">
+        {/* Two CTAs Side-by-Side */}
+        <div className="flex flex-col sm:flex-row items-center gap-4">
           <button
-            onClick={handleUploadClick}
+            onClick={onUploadClick}
             disabled={isAnalyzing}
             className={`${
               isAnalyzing
-                ? 'bg-gray-400 cursor-not-allowed'
-                : 'bg-primary-blue hover:bg-blue-600 hover:scale-105 hover:shadow-xl cursor-pointer'
-            } text-white px-8 py-4 rounded-lg font-semibold text-lg transition-all duration-200 inline-flex items-center space-x-2`}
+                ? 'bg-[#A8A29E] cursor-not-allowed'
+                : 'bg-[#F97316] hover:bg-[#EA580C] cursor-pointer shadow-lg shadow-[#F97316]/20'
+            } text-white px-8 py-4 rounded-lg text-lg font-semibold transition-all duration-200 hover:scale-105 disabled:hover:scale-100 disabled:opacity-50 inline-flex items-center space-x-2 w-full sm:w-auto`}
             aria-label={isAnalyzing ? 'Analyzing document' : 'Upload your documentation'}
           >
             {isAnalyzing ? (
@@ -74,35 +48,44 @@ const Hero = ({ onFileUpload, isAnalyzing }: HeroProps) => {
             ) : (
               <>
                 <Upload className="w-6 h-6" aria-hidden="true" />
-                <span>Upload Your Documentation</span>
+                <span>Upload Documentation</span>
               </>
             )}
+          </button>
+          
+          <button
+            onClick={onGitHubClick}
+            className="bg-white text-[#1C1917] border-2 border-[#E7E5E4] px-8 py-4 rounded-lg text-lg font-semibold hover:border-[#F97316] transition-all duration-200 hover:scale-105 cursor-pointer inline-flex items-center space-x-2 w-full sm:w-auto"
+            aria-label="Connect GitHub"
+          >
+            <Github className="w-6 h-6" aria-hidden="true" />
+            <span>Connect GitHub</span>
           </button>
         </div>
 
         {/* See example report link */}
         <button
           onClick={scrollToPreview}
-          className="text-primary-blue hover:text-blue-600 font-medium mb-12 transition-colors duration-200 cursor-pointer inline-flex items-center space-x-1"
+          className="text-[#F97316] hover:text-[#EA580C] font-medium mt-8 transition-colors duration-200 cursor-pointer inline-flex items-center space-x-1 underline"
           aria-label="See example report"
         >
           <span>See example report</span>
           <span>→</span>
         </button>
 
-        {/* Trust Badges */}
-        <div className="flex flex-col sm:flex-row items-center justify-center gap-6 sm:gap-8 text-sm sm:text-base text-gray-600">
-          <div className="flex items-center space-x-2">
-            <Check className="w-5 h-5 text-green-500 flex-shrink-0" aria-hidden="true" />
-            <span>Trusted by 500+ technical writers</span>
+        {/* Trust Badges with generous spacing */}
+        <div className="flex flex-col sm:flex-row items-center gap-8 mt-16">
+          <div className="flex items-center gap-2">
+            <Check className="w-5 h-5 text-[#10B981] flex-shrink-0" aria-hidden="true" />
+            <span className="text-[#57534E] text-sm">Trusted by 500+ technical writers</span>
           </div>
-          <div className="flex items-center space-x-2">
-            <Check className="w-5 h-5 text-green-500 flex-shrink-0" aria-hidden="true" />
-            <span>SOC 2 Compliant</span>
+          <div className="flex items-center gap-2">
+            <Check className="w-5 h-5 text-[#10B981] flex-shrink-0" aria-hidden="true" />
+            <span className="text-[#57534E] text-sm">SOC 2 Compliant</span>
           </div>
-          <div className="flex items-center space-x-2">
-            <Check className="w-5 h-5 text-green-500 flex-shrink-0" aria-hidden="true" />
-            <span>No credit card required</span>
+          <div className="flex items-center gap-2">
+            <Check className="w-5 h-5 text-[#10B981] flex-shrink-0" aria-hidden="true" />
+            <span className="text-[#57534E] text-sm">No credit card required</span>
           </div>
         </div>
       </div>
@@ -111,4 +94,3 @@ const Hero = ({ onFileUpload, isAnalyzing }: HeroProps) => {
 };
 
 export default Hero;
-

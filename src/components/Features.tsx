@@ -20,23 +20,27 @@ const Features = () => {
   ];
 
   return (
-    <section className="py-20 px-4 sm:px-6 lg:px-8 bg-white">
-      <div className="max-w-7xl mx-auto">
+    <section className="min-h-screen flex items-center justify-center py-32 px-4 sm:px-6 lg:px-8 bg-gray-50">
+      <div className="max-w-7xl mx-auto w-full">
+        {/* Heading */}
+        <h2 className="text-5xl font-bold text-gray-900 text-center mb-16">
+          How DocDocs Works
+        </h2>
+
+        {/* Feature Cards */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
           {features.map((feature, index) => {
             const IconComponent = feature.icon;
             return (
               <div
                 key={index}
-                className="bg-white rounded-xl shadow-lg p-8 text-center hover:shadow-xl transition-shadow duration-300"
+                className="bg-white rounded-2xl shadow-xl p-12 text-center h-80 flex flex-col items-center justify-center hover:shadow-2xl transition-shadow duration-300"
               >
-                <div className="flex justify-center mb-4">
-                  <div className="bg-blue-50 rounded-full p-4">
-                    <IconComponent className="w-12 h-12 text-primary-blue" aria-hidden="true" />
-                  </div>
+                <div className="bg-blue-50 rounded-full p-6 mb-6">
+                  <IconComponent className="w-20 h-20 text-primary-blue" strokeWidth={1.5} aria-hidden="true" />
                 </div>
-                <h3 className="text-2xl font-bold text-gray-900 mb-3">{feature.title}</h3>
-                <p className="text-gray-600">{feature.description}</p>
+                <h3 className="text-3xl font-bold text-gray-900 mb-4">{feature.title}</h3>
+                <p className="text-lg text-gray-600 leading-relaxed">{feature.description}</p>
               </div>
             );
           })}
@@ -47,4 +51,3 @@ const Features = () => {
 };
 
 export default Features;
-
