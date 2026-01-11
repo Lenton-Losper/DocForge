@@ -40,42 +40,21 @@ export function RepositoryPicker({ onSelect, onCancel }: RepositoryPickerProps) 
       setLoading(true);
       setError('');
 
-      // Get GitHub token from session
       const { data: { session } } = await supabase.auth.getSession();
-      
-      // Check if user has GitHub identity
-      const hasGitHub = session?.user?.identities?.some((id: any) => id.provider === 'github');
-      
-      if (!hasGitHub) {
+      const githubToken = session?.provider_token;
+
+      if (!githubToken) {
         setError('GitHub not connected. Please connect your GitHub account in Settings.');
         setLoading(false);
         return;
       }
-
-      // For now, we'll need to get the token from the user's metadata
-      // Supabase stores provider_token in the session, but we need to access it
-      // This is a limitation - we may need to store it in the database
-      // For now, let's try to use the session's provider_token
-      const githubToken = (session as any)?.provider_token;
-
-      if (!githubToken) {
-        // Try to get from user metadata (if stored)
-        const storedToken = session?.user?.user_metadata?.github_token;
-        if (!storedToken) {
-          setError('GitHub token not available. Please reconnect your GitHub account.');
-          setLoading(false);
-          return;
-        }
-      }
-
-      const token = githubToken || (session?.user?.user_metadata?.github_token as string);
 
       // Fetch repos from GitHub API
       const response = await fetch(
         'https://api.github.com/user/repos?per_page=100&sort=updated&affiliation=owner,collaborator',
         {
           headers: {
-            'Authorization': `Bearer ${token}`,
+            'Authorization': `Bearer ${githubToken}`,
             'Accept': 'application/vnd.github.v3+json'
           }
         }

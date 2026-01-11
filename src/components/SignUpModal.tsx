@@ -1,6 +1,7 @@
-import { X } from 'lucide-react';
+import { X, Github } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { supabase } from '../lib/supabase.js';
 
 interface SignUpModalProps {
   isOpen: boolean;
@@ -23,6 +24,26 @@ const SignUpModal = ({
   const [error, setError] = useState<string | null>(null);
   const [isLoginMode, setIsLoginMode] = useState(initialMode === 'login');
   const { signUp, signIn } = useAuth();
+
+  async function signInWithGitHub() {
+    try {
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: 'github',
+        options: {
+          scopes: 'repo read:user',
+          redirectTo: `${window.location.origin}/dashboard`
+        }
+      });
+      
+      if (error) {
+        console.error('GitHub OAuth error:', error);
+        setError(error.message);
+      }
+    } catch (err) {
+      console.error('GitHub sign-in error:', err);
+      setError('Failed to sign in with GitHub');
+    }
+  }
 
   // Update mode when initialMode prop changes
   useEffect(() => {
@@ -132,6 +153,27 @@ const SignUpModal = ({
           </div>
         )}
 
+        {/* GitHub OAuth Button */}
+        <div className="mb-6">
+          <button
+            onClick={signInWithGitHub}
+            type="button"
+            className="w-full bg-[#1C1917] text-white py-3 rounded-lg hover:bg-[#57534E] transition-all flex items-center justify-center gap-2 font-semibold"
+          >
+            <Github className="w-5 h-5" />
+            Continue with GitHub
+          </button>
+          
+          <div className="relative my-6">
+            <div className="absolute inset-0 flex items-center">
+              <div className="w-full border-t border-[#E7E5E4]"></div>
+            </div>
+            <div className="relative flex justify-center text-sm">
+              <span className="px-4 bg-white text-[#A8A29E]">Or continue with email</span>
+            </div>
+          </div>
+        </div>
+
         {/* Form */}
         <form onSubmit={handleSubmit} className="space-y-6">
           {/* Email Input */}
@@ -187,7 +229,7 @@ const SignUpModal = ({
               <button
                 type="button"
                 onClick={() => setIsLoginMode(false)}
-                className="text-[#F97316] hover:text-[#EA580C] underline transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-[#F97316] focus:ring-offset-2 rounded font-medium"
+                className="text-[#F97316] hover:text-[#EA580C] underline transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-[#F97316] focus:ring-offset-2 rounded font-semibold"
               >
                 Sign up
               </button>
@@ -198,7 +240,7 @@ const SignUpModal = ({
               <button
                 type="button"
                 onClick={() => setIsLoginMode(true)}
-                className="text-[#F97316] hover:text-[#EA580C] underline transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-[#F97316] focus:ring-offset-2 rounded font-medium"
+                className="text-[#F97316] hover:text-[#EA580C] underline transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-[#F97316] focus:ring-offset-2 rounded font-semibold"
               >
                 Log in
               </button>

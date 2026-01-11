@@ -1,16 +1,16 @@
 /** Documentation generation service using GitHub API and AI. */
 import { Octokit } from '@octokit/rest';
 import { createClient } from '@supabase/supabase-js';
-import Anthropic from '@anthropic-ai/sdk';
+import OpenAI from 'openai';
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-const anthropic = process.env.ANTHROPIC_API_KEY
-  ? new Anthropic({
-      apiKey: process.env.ANTHROPIC_API_KEY
+const openai = process.env.OPENAI_API_KEY
+  ? new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY
     })
   : null;
 
@@ -29,22 +29,24 @@ export async function generateDocsForRepository(repositoryId: string) {
       throw new Error('Repository not found');
     }
 
-    // 2. Get user to access GitHub token
-    // Note: In production, you'd store the provider_token securely
-    // For now, we'll try to get it from the user's session metadata
+    // 2. Get user's GitHub token
     const { data: { user }, error: userError } = await supabase.auth.admin.getUserById(repo.user_id);
     
     if (userError || !user) {
       throw new Error('User not found');
     }
 
-    // Get GitHub token from user metadata or use fallback
-    const githubToken = user.user_metadata?.github_token 
+    // Get GitHub token from user's OAuth identity or use fallback
+    // Supabase stores provider_token in the identity, but we need to access it
+    // Check if user has GitHub identity
+    const githubIdentity = user.identities?.find((id: any) => id.provider === 'github');
+    const githubToken = githubIdentity?.identity_data?.provider_token 
+      || user.user_metadata?.github_token 
       || user.user_metadata?.provider_token 
       || process.env.GITHUB_TOKEN;
 
     if (!githubToken) {
-      throw new Error('GitHub token not available. Please reconnect your GitHub account.');
+      throw new Error('GitHub token not available. Please reconnect your GitHub account in Settings.');
     }
 
     // 3. Initialize GitHub API client
@@ -128,8 +130,8 @@ export async function generateDocsForRepository(repositoryId: string) {
 }
 
 async function generateReadme(repoData: any, packageJson: any, repo: any): Promise<string> {
-  if (!anthropic) {
-    return `# ${repoData.name}\n\n${repoData.description || 'No description provided'}\n\n*AI documentation generation not configured. Please add ANTHROPIC_API_KEY to backend .env*`;
+  if (!openai) {
+    return `# ${repoData.name}\n\n${repoData.description || 'No description provided'}\n\n*AI documentation generation not configured. Please add OPENAI_API_KEY to backend .env*`;
   }
 
   const prompt = `Generate a comprehensive, professional README.md for this GitHub repository:
@@ -152,16 +154,17 @@ Create a README that includes:
 Format as clean, professional markdown. Be specific and actionable. Avoid generic placeholders.`;
 
   try {
-    const message = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 2000,
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4o',
       messages: [{
         role: 'user',
         content: prompt
-      }]
+      }],
+      max_tokens: 2000,
+      temperature: 0.7
     });
 
-    return message.content[0].type === 'text' ? message.content[0].text : '';
+    return completion.choices[0]?.message?.content || '';
   } catch (error) {
     console.error('Error generating README:', error);
     return `# ${repoData.name}\n\n${repoData.description || 'No description provided'}\n\n*Error generating documentation*`;
@@ -190,7 +193,7 @@ async function generateSetupGuide(packageJson: any, repo: any): Promise<string> 
     return '# Setup Guide\n\n*No setup instructions available*\n\nThis repository does not have a package.json file.';
   }
 
-  if (!anthropic) {
+  if (!openai) {
     return `# Setup Guide\n\n## Installation\n\n\`\`\`bash\nnpm install\n\`\`\`\n\n## Running\n\n\`\`\`bash\nnpm start\n\`\`\`\n\n*AI documentation generation not configured*`;
   }
 
@@ -212,16 +215,17 @@ Include:
 Be specific and actionable. Format as markdown.`;
 
   try {
-    const message = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 1500,
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4o',
       messages: [{
         role: 'user',
         content: prompt
-      }]
+      }],
+      max_tokens: 1500,
+      temperature: 0.7
     });
 
-    return message.content[0].type === 'text' ? message.content[0].text : '';
+    return completion.choices[0]?.message?.content || '';
   } catch (error) {
     console.error('Error generating setup guide:', error);
     return `# Setup Guide\n\n## Installation\n\n\`\`\`bash\nnpm install\n\`\`\`\n\n*Error generating documentation*`;
@@ -233,7 +237,7 @@ async function generateArchitecture(contents: any[], repo: any): Promise<string>
     ? contents.map(item => `${item.type === 'dir' ? '📁' : '📄'} ${item.name}`).join('\n')
     : 'Unable to read structure';
 
-  if (!anthropic) {
+  if (!openai) {
     return `# Architecture\n\n## File Structure\n\n\`\`\`\n${fileStructure}\n\`\`\`\n\n*AI documentation generation not configured*`;
   }
 
@@ -255,16 +259,17 @@ Create architecture documentation that includes:
 Format as markdown. Be clear and technical.`;
 
   try {
-    const message = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 1500,
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4o',
       messages: [{
         role: 'user',
         content: prompt
-      }]
+      }],
+      max_tokens: 1500,
+      temperature: 0.7
     });
 
-    return message.content[0].type === 'text' ? message.content[0].text : '';
+    return completion.choices[0]?.message?.content || '';
   } catch (error) {
     console.error('Error generating architecture:', error);
     return `# Architecture\n\n## File Structure\n\n\`\`\`\n${fileStructure}\n\`\`\`\n\n*Error generating documentation*`;

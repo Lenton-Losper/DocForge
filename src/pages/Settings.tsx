@@ -31,15 +31,35 @@ const Settings = () => {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       
-      if (session?.user?.app_metadata?.provider === 'github') {
+      if (!session) {
+        setGithubConnected(false);
+        setGithubUsername('');
+        return;
+      }
+
+      // Check multiple ways GitHub might be connected
+      const hasGitHubProvider = session.user?.app_metadata?.provider === 'github';
+      const hasGitHubIdentity = session.user?.identities?.some(
+        (id: any) => id.provider === 'github'
+      );
+      const hasProviderToken = !!session.provider_token;
+
+      if (hasGitHubProvider || hasGitHubIdentity || hasProviderToken) {
         setGithubConnected(true);
-        setGithubUsername(session.user.user_metadata?.user_name || 'Connected');
-      } else if (session?.user?.identities?.some((id: any) => id.provider === 'github')) {
-        setGithubConnected(true);
-        setGithubUsername(session.user.user_metadata?.user_name || 'Connected');
+        setGithubUsername(
+          session.user.user_metadata?.user_name || 
+          session.user.email?.split('@')[0] || 
+          'Connected'
+        );
+      } else {
+        setGithubConnected(false);
+        setGithubUsername('');
       }
     } catch (error) {
       console.error('Error checking GitHub connection:', error);
+      // Gracefully handle error - don't crash
+      setGithubConnected(false);
+      setGithubUsername('');
     }
   }
 
@@ -49,11 +69,18 @@ const Settings = () => {
       
       if (session?.provider_token || session?.user?.identities?.some((id: any) => id.provider === 'github')) {
         setGithubConnected(true);
-        setGithubUsername(session.user.user_metadata?.user_name || 'Connected');
+        setGithubUsername(
+          session.user.user_metadata?.user_name || 
+          session.user.email?.split('@')[0] || 
+          'Connected'
+        );
         alert('GitHub connected successfully!');
+      } else {
+        console.warn('GitHub callback received but no provider token found');
       }
     } catch (error) {
       console.error('Error handling GitHub callback:', error);
+      // Don't show error to user - just log it
     }
   }
 
@@ -82,22 +109,53 @@ const Settings = () => {
     }
   }
 
-  const handleDisconnectGitHub = async () => {
-    if (confirm('Disconnect GitHub? This will remove access to your repositories.')) {
-      // Note: Supabase doesn't have a direct "unlink" method
-      // You'd need to handle this in your database
-      // For now, we'll just update the UI state
-      // TODO: Implement proper disconnection via backend API
+  async function handleDisconnectGitHub() {
+    try {
+      if (!confirm('Disconnect GitHub? This will remove access to your repositories.')) {
+        return;
+      }
+
+      // Check if GitHub is actually connected
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session) {
+        // No session, just update UI
+        setGithubConnected(false);
+        setGithubUsername('');
+        return;
+      }
+
+      // Check if user has GitHub identity
+      const hasGitHubIdentity = session.user?.identities?.some(
+        (id: any) => id.provider === 'github'
+      ) || session.user?.app_metadata?.provider === 'github';
+
+      if (!hasGitHubIdentity && !session.provider_token) {
+        // GitHub not actually connected, just update UI
+        setGithubConnected(false);
+        setGithubUsername('');
+        return;
+      }
+
+      // TODO: In production, call backend API to revoke GitHub token
+      // Example: await fetch('/api/github/disconnect', { method: 'POST' })
+      // The backend should:
+      // 1. Revoke the GitHub OAuth token via GitHub API
+      // 2. Remove provider_token from user metadata
+      // 3. Clear any stored GitHub tokens in database
+
+      // For now, just update UI state
+      // Note: This does NOT sign the user out - they remain logged in
+      // Only the GitHub connection is removed from UI
       setGithubConnected(false);
       setGithubUsername('');
-      alert('GitHub disconnected');
+      
+      alert('GitHub disconnected. Please reconnect to access repositories.');
+    } catch (error) {
+      console.error('Error disconnecting GitHub:', error);
+      alert('Failed to disconnect GitHub. Please try again.');
     }
-  };
-
-  const handleConnectGitHub = () => {
-    // TODO: Trigger GitHub OAuth flow
-    console.log('Connect GitHub');
-  };
+  }
 
   const handleDeleteAccount = () => {
     // TODO: Show confirmation modal and call backend API

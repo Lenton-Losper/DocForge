@@ -1,238 +1,272 @@
 /** Project detail page - Documentation viewer. */
-import { useEffect, useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
-import { Github, RefreshCw, Download, FileText, BookOpen, Code, Settings } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { useParams, useNavigate, Link } from 'react-router-dom';
+import { supabase } from '../lib/supabase.js';
+import { 
+  ArrowLeft, 
+  RefreshCw, 
+  Download, 
+  FileText, 
+  Code, 
+  Settings as SettingsIcon,
+  Box,
+  Loader2,
+  AlertCircle
+} from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
 
-interface DocSection {
-  id: string;
-  title: string;
-  type: 'readme' | 'api' | 'setup' | 'architecture';
-}
-
-const ProjectDetail = () => {
-  const { id } = useParams<{ id: string }>();
-  const [project, setProject] = useState<{
-    name: string;
-    owner: string;
-    url: string;
-  } | null>(null);
-  const [selectedSection, setSelectedSection] = useState<string>('readme');
-  const [content, setContent] = useState<string>('');
+export default function ProjectDetail() {
+  const { id } = useParams();
+  const navigate = useNavigate();
+  
+  const [repository, setRepository] = useState<any>(null);
+  const [docs, setDocs] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-
-  const sections: DocSection[] = [
-    { id: 'readme', title: 'README', type: 'readme' },
-    { id: 'api', title: 'API Documentation', type: 'api' },
-    { id: 'setup', title: 'Setup Guide', type: 'setup' },
-    { id: 'architecture', title: 'Architecture', type: 'architecture' },
-  ];
+  const [activeSection, setActiveSection] = useState('readme');
+  const [regenerating, setRegenerating] = useState(false);
 
   useEffect(() => {
-    fetchProjectAndDocs();
-  }, [id, selectedSection]);
+    if (id) {
+      fetchRepositoryAndDocs();
+    }
+  }, [id]);
 
-  async function fetchProjectAndDocs() {
+  async function fetchRepositoryAndDocs() {
     try {
       setLoading(true);
-      
-      // TODO: Fetch from backend API
-      // For now, use mock data
-      setTimeout(() => {
-        setProject({
-          name: 'api-server',
-          owner: 'acme',
-          url: 'https://github.com/acme/api-server',
-        });
-        
-        // Mock content based on selected section
-        const mockContent: Record<string, string> = {
-          readme: `# README Documentation
 
-This is the README documentation for the project.
+      // Fetch repository
+      const { data: repo, error: repoError } = await supabase
+        .from('repositories')
+        .select('*')
+        .eq('id', id)
+        .single();
 
-## Overview
+      if (repoError || !repo) {
+        console.error('Repository not found:', repoError);
+        alert('Repository not found');
+        navigate('/projects');
+        return;
+      }
 
-Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.
+      setRepository(repo);
 
-## Getting Started
+      // Fetch generated docs
+      const { data: generatedDocs, error: docsError } = await supabase
+        .from('generated_docs')
+        .select('*')
+        .eq('repository_id', id)
+        .single();
 
-1. Install dependencies
-2. Configure environment
-3. Run the application
+      if (docsError) {
+        console.error('Docs not found:', docsError);
+        // Docs might not be generated yet
+        setDocs(null);
+      } else {
+        setDocs(generatedDocs);
+      }
 
-## Features
-
-- Feature 1
-- Feature 2
-- Feature 3`,
-          api: `# API Documentation
-
-## Endpoints
-
-\`\`\`typescript
-GET /api/users
-POST /api/users
-GET /api/users/:id
-\`\`\`
-
-*API documentation will be generated from code analysis*`,
-          setup: `# Setup Guide
-
-## Prerequisites
-
-- Node.js 18+
-- npm or yarn
-
-## Installation
-
-\`\`\`bash
-npm install
-\`\`\`
-
-## Running
-
-\`\`\`bash
-npm start
-\`\`\``,
-          architecture: `# Architecture
-
-## System Overview
-
-High-level system architecture documentation.
-
-## Components
-
-- Component 1
-- Component 2
-- Component 3`
-        };
-        
-        setContent(mockContent[selectedSection] || mockContent.readme);
-        setLoading(false);
-      }, 500);
+      setLoading(false);
     } catch (error) {
-      console.error('Failed to fetch project:', error);
+      console.error('Error fetching data:', error);
       setLoading(false);
     }
   }
 
-  const handleRegenerate = () => {
-    // TODO: Call backend API to regenerate docs
-    console.log('Regenerate docs for project:', id);
-  };
+  async function handleRegenerate() {
+    if (!confirm('Regenerate documentation? This will overwrite existing docs.')) {
+      return;
+    }
 
-  const handleExport = (format: 'markdown' | 'pdf') => {
-    // TODO: Call backend API to export docs
-    console.log('Export docs as:', format);
-  };
+    try {
+      setRegenerating(true);
+
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/generate-docs`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session?.access_token}`
+        },
+        body: JSON.stringify({ repository_id: id })
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to regenerate documentation');
+      }
+
+      alert('Documentation is being regenerated! Refresh in a moment.');
+      
+      // Wait a bit then refresh
+      setTimeout(() => {
+        fetchRepositoryAndDocs();
+        setRegenerating(false);
+      }, 3000);
+    } catch (err) {
+      console.error('Regenerate error:', err);
+      alert('Failed to regenerate documentation');
+      setRegenerating(false);
+    }
+  }
+
+  async function handleExport(format: 'markdown' | 'pdf') {
+    if (!docs) {
+      alert('No documentation to export');
+      return;
+    }
+
+    if (format === 'markdown') {
+      // Export as markdown file
+      const content = `# ${repository.repo_name}\n\n${docs.readme}\n\n## API Documentation\n\n${docs.api_docs}\n\n## Setup Guide\n\n${docs.setup_guide}\n\n## Architecture\n\n${docs.architecture}`;
+      
+      const blob = new Blob([content], { type: 'text/markdown' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${repository.repo_name}-docs.md`;
+      a.click();
+    } else {
+      alert('PDF export coming soon!');
+    }
+  }
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[#FAFAF9]">
+      <div className="min-h-screen bg-[#FAFAF9] flex items-center justify-center">
+        <Loader2 className="w-12 h-12 text-[#F97316] animate-spin" />
+      </div>
+    );
+  }
+
+  if (!repository) {
+    return (
+      <div className="min-h-screen bg-[#FAFAF9] flex items-center justify-center">
         <div className="text-center">
-          <div className="w-12 h-12 border-4 border-[#F97316] border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-[#57534E]">Loading documentation...</p>
+          <AlertCircle className="w-16 h-16 text-[#EF4444] mx-auto mb-4" />
+          <h2 className="text-2xl font-bold text-[#1C1917] mb-2">Repository Not Found</h2>
+          <Link to="/projects" className="text-[#F97316] hover:text-[#EA580C]">
+            ← Back to Projects
+          </Link>
         </div>
       </div>
     );
   }
 
+  const sections = [
+    { id: 'readme', label: 'README', icon: FileText, content: docs?.readme },
+    { id: 'api', label: 'API Documentation', icon: Code, content: docs?.api_docs },
+    { id: 'setup', label: 'Setup Guide', icon: SettingsIcon, content: docs?.setup_guide },
+    { id: 'architecture', label: 'Architecture', icon: Box, content: docs?.architecture }
+  ];
+
+  const currentSection = sections.find(s => s.id === activeSection);
+
   return (
     <div className="min-h-screen bg-[#FAFAF9]">
       {/* Header */}
-      <div className="bg-white border-b border-[#E7E5E4]">
-        <div className="max-w-7xl mx-auto px-8 py-6">
-          <Link to="/projects" className="text-[#57534E] hover:text-[#1C1917] text-sm mb-4 inline-block">
-            ← Back to Projects
-          </Link>
-          <div className="flex items-center gap-3 mb-2">
-            <Github className="w-6 h-6 text-[#57534E]" />
-            <h1 className="text-2xl font-bold text-[#1C1917]">{project?.name}</h1>
+      <nav className="bg-white border-b border-[#E7E5E4] px-8 py-4">
+        <div className="max-w-7xl mx-auto flex justify-between items-center">
+          <div className="flex items-center gap-4">
+            <Link
+              to="/projects"
+              className="text-[#57534E] hover:text-[#1C1917] transition-colors"
+            >
+              <ArrowLeft className="w-5 h-5" />
+            </Link>
+            <div>
+              <h1 className="text-2xl font-bold text-[#1C1917]">{repository.repo_name}</h1>
+              <p className="text-sm text-[#57534E]">{repository.repo_owner}</p>
+            </div>
           </div>
-          <p className="text-sm text-[#57534E]">{project?.owner}</p>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleRegenerate}
+              disabled={regenerating}
+              className="px-4 py-2 text-white bg-[#F97316] hover:bg-[#EA580C] rounded-lg transition-all flex items-center gap-2 disabled:opacity-50"
+            >
+              <RefreshCw className={`w-4 h-4 ${regenerating ? 'animate-spin' : ''}`} />
+              Regenerate Docs
+            </button>
+            <div className="relative group">
+              <button className="px-4 py-2 text-[#57534E] hover:text-[#1C1917] hover:bg-[#F5F5F4] rounded-lg transition-all flex items-center gap-2">
+                <Download className="w-4 h-4" />
+                Export
+              </button>
+              <div className="absolute right-0 mt-2 w-48 bg-white border-2 border-[#E7E5E4] rounded-lg shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all">
+                <button
+                  onClick={() => handleExport('markdown')}
+                  className="w-full px-4 py-2 text-left hover:bg-[#F5F5F4] transition-colors"
+                >
+                  Markdown
+                </button>
+                <button
+                  onClick={() => handleExport('pdf')}
+                  className="w-full px-4 py-2 text-left hover:bg-[#F5F5F4] transition-colors"
+                >
+                  PDF (Coming Soon)
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
-      </div>
+      </nav>
 
-      <div className="max-w-7xl mx-auto px-8 py-8">
-        <div className="flex gap-8">
-          {/* Sidebar - Table of Contents */}
-          <div className="w-64 flex-shrink-0">
-            <div className="bg-white rounded-2xl p-6 border border-[#E7E5E4] sticky top-8">
-              <p className="text-xs uppercase tracking-wider text-[#A8A29E] mb-4">Table of Contents</p>
-              <div className="space-y-1">
-                {sections.map((section) => (
+      {/* Main Content */}
+      <div className="max-w-7xl mx-auto px-8 py-8 flex gap-8">
+        {/* Sidebar */}
+        <div className="w-64 flex-shrink-0">
+          <div className="bg-white rounded-xl border-2 border-[#E7E5E4] p-4 sticky top-8">
+            <h3 className="text-sm font-semibold text-[#A8A29E] uppercase tracking-wider mb-4">
+              Table of Contents
+            </h3>
+            <div className="space-y-1">
+              {sections.map((section) => {
+                const Icon = section.icon;
+                return (
                   <button
                     key={section.id}
-                    onClick={() => setSelectedSection(section.id)}
-                    className={`w-full text-left px-4 py-2 rounded-lg transition-all duration-200 ${
-                      selectedSection === section.id
+                    onClick={() => setActiveSection(section.id)}
+                    className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg transition-all text-left ${
+                      activeSection === section.id
                         ? 'bg-[#FFF5F0] text-[#F97316] font-semibold'
-                        : 'text-[#57534E] hover:bg-[#FAFAF9]'
+                        : 'text-[#57534E] hover:bg-[#F5F5F4]'
                     }`}
                   >
-                    <div className="flex items-center gap-2">
-                      {section.type === 'readme' && <FileText className="w-4 h-4" />}
-                      {section.type === 'api' && <Code className="w-4 h-4" />}
-                      {section.type === 'setup' && <Settings className="w-4 h-4" />}
-                      {section.type === 'architecture' && <BookOpen className="w-4 h-4" />}
-                      <span>{section.title}</span>
-                    </div>
+                    <Icon className="w-4 h-4" />
+                    {section.label}
                   </button>
-                ))}
-              </div>
+                );
+              })}
             </div>
           </div>
+        </div>
 
-          {/* Main Content */}
-          <div className="flex-1">
-            <div className="bg-white rounded-2xl p-8 border border-[#E7E5E4] mb-6">
-              <div className="flex items-center justify-between mb-6">
-                <h2 className="text-2xl font-bold text-[#1C1917]">
-                  {sections.find((s) => s.id === selectedSection)?.title}
-                </h2>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={handleRegenerate}
-                    className="px-4 py-2 bg-[#F97316] text-white rounded-lg hover:bg-[#EA580C] transition-all duration-200 inline-flex items-center space-x-2"
-                  >
-                    <RefreshCw className="w-4 h-4" />
-                    <span>Regenerate Docs</span>
-                  </button>
-                  <div className="relative group">
-                    <button className="px-4 py-2 border border-[#E7E5E4] rounded-lg text-[#57534E] hover:border-[#F97316] transition-all duration-200 inline-flex items-center space-x-2">
-                      <Download className="w-4 h-4" />
-                      <span>Export</span>
-                    </button>
-                    <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border border-[#E7E5E4] opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-10">
-                      <button
-                        onClick={() => handleExport('markdown')}
-                        className="w-full text-left px-4 py-2 hover:bg-[#FAFAF9] rounded-t-lg text-sm text-[#57534E]"
-                      >
-                        Export as Markdown
-                      </button>
-                      <button
-                        onClick={() => handleExport('pdf')}
-                        className="w-full text-left px-4 py-2 hover:bg-[#FAFAF9] rounded-b-lg text-sm text-[#57534E]"
-                      >
-                        Export as PDF
-                      </button>
-                    </div>
-                  </div>
-                </div>
+        {/* Documentation Content */}
+        <div className="flex-1">
+          <div className="bg-white rounded-xl border-2 border-[#E7E5E4] p-8">
+            {!docs ? (
+              <div className="text-center py-12">
+                <Loader2 className="w-12 h-12 text-[#F97316] animate-spin mx-auto mb-4" />
+                <h3 className="text-xl font-bold text-[#1C1917] mb-2">Generating Documentation...</h3>
+                <p className="text-[#57534E]">This may take a minute. Please wait.</p>
+                <button
+                  onClick={() => fetchRepositoryAndDocs()}
+                  className="mt-6 text-[#F97316] hover:text-[#EA580C] underline"
+                >
+                  Refresh
+                </button>
               </div>
-
-              {/* Documentation Content */}
+            ) : (
               <div className="prose prose-slate max-w-none">
-                <div className="whitespace-pre-wrap text-[#1C1917] leading-relaxed">
-                  {content}
-                </div>
+                <ReactMarkdown>
+                  {sections.find(s => s.id === activeSection)?.content || '# No content available'}
+                </ReactMarkdown>
               </div>
-            </div>
+            )}
           </div>
         </div>
       </div>
     </div>
   );
-};
-
-export default ProjectDetail;
+}
