@@ -13,11 +13,11 @@ Create `backend/.env` file:
 
 ```env
 SUPABASE_URL=https://afcgapmhwnxeposwbhdu.supabase.co
-SUPABASE_SERVICE_ROLE_KEY=sb_secret_w56u7KGkEoKWAQ1JeBErCg_cgbmXoP_
+SUPABASE_SERVICE_ROLE_KEY=sb_secret_your-service-role-key-here
 PORT=8000
 ```
 
-⚠️ **Replace `sb_secret_w56u7KGkEoKWAQ1JeBErCg_cgbmXoP_` with your actual service_role key!**
+⚠️ **Replace `sb_secret_your-service-role-key-here` with your actual service_role key!**
 
 ## Step 3: Install Dependencies
 

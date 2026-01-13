@@ -17,7 +17,7 @@
 
 ```env
 SUPABASE_URL=https://afcgapmhwnxeposwbhdu.supabase.co
-SUPABASE_SERVICE_ROLE_KEY=sb_secret_w56u7KGkEoKWAQ1JeBErCg_cgbmXoP_
+SUPABASE_SERVICE_ROLE_KEY=sb_secret_your-service-role-key-here
 PORT=8000
 ```
 
