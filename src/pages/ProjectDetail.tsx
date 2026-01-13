@@ -35,16 +35,39 @@ export default function ProjectDetail() {
   const [pollingInterval, setPollingInterval] = useState<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
-    if (id) {
-      // Wrap in catch to prevent unhandled promise rejections
-      fetchRepositoryAndDocs().catch(err => {
-        console.error('[PROJECT-DETAIL] Error fetching repository and docs:', err);
-        setLoading(false);
-      });
-    }
+    if (!id) return;
+
+    let interval: NodeJS.Timeout | null = null;
+
+    // Initial fetch
+    fetchRepositoryAndDocs().then(status => {
+      // If generation is in progress, start polling automatically
+      if (status === 'generating') {
+        interval = setInterval(async () => {
+          try {
+            const currentStatus = await fetchRepositoryAndDocs();
+            if (currentStatus === 'complete' || currentStatus === 'failed') {
+              if (interval) {
+                clearInterval(interval);
+                setPollingInterval(null);
+              }
+            }
+          } catch (error) {
+            console.error('[PROJECT-DETAIL] Polling error:', error);
+          }
+        }, 2500); // Poll every 2.5 seconds (2-3 second range)
+        setPollingInterval(interval);
+      }
+    }).catch(err => {
+      console.error('[PROJECT-DETAIL] Error fetching repository and docs:', err);
+      setLoading(false);
+    });
     
     // Cleanup: Clear polling interval on unmount
     return () => {
+      if (interval) {
+        clearInterval(interval);
+      }
       if (pollingInterval) {
         clearInterval(pollingInterval);
         setPollingInterval(null);
@@ -188,6 +211,7 @@ export default function ProjectDetail() {
 
   async function handleRegenerate() {
     // Prevent spam clicks - check local state AND backend status
+    // Frontend is read-only - only disable button, don't update state optimistically
     if (isRegenerating || docsStatus === 'generating') {
       console.warn('[REGENERATE] Generation already in progress or button locked');
       return;
@@ -198,27 +222,27 @@ export default function ProjectDetail() {
     }
 
     try {
-      // Lock button immediately to prevent spam
+      // Lock button to prevent spam (read-only - no optimistic state updates)
       setIsRegenerating(true);
-      setDocsStatus('generating');
-      setProgress(0);
-      setCurrentStep('Starting generation...');
 
       // Get session and validate
       const { data: { session }, error: sessionError } = await supabase.auth.getSession();
       
       if (sessionError) {
         console.error('[REGENERATE] Session error:', sessionError);
+        setIsRegenerating(false);
         throw new Error('Failed to get session: ' + sessionError.message);
       }
 
       if (!session?.access_token) {
         console.error('[REGENERATE] No access token in session');
+        setIsRegenerating(false);
         throw new Error('Not authenticated. Please log in again.');
       }
 
       if (!id) {
         console.error('[REGENERATE] No repository ID');
+        setIsRegenerating(false);
         throw new Error('Repository ID is missing');
       }
 
@@ -251,13 +275,17 @@ export default function ProjectDetail() {
           data: responseData
         });
         
+        setIsRegenerating(false);
+        
         let errorMessage = 'Failed to regenerate documentation';
         if (response.status === 400) {
-          errorMessage = responseData.error || 'Invalid request. Check repository ID.';
+          errorMessage = responseData.error || responseData.message || 'Invalid request. Check repository ID.';
         } else if (response.status === 401) {
           errorMessage = 'Authentication failed. Please log in again.';
         } else if (response.status === 404) {
           errorMessage = 'Repository not found or access denied.';
+        } else if (response.status === 409) {
+          errorMessage = responseData.error || 'Documentation generation is already in progress';
         } else if (response.status >= 500) {
           errorMessage = 'Server error. Please try again later.';
         }
@@ -267,11 +295,12 @@ export default function ProjectDetail() {
 
       console.log('[REGENERATE] Generation started:', responseData);
 
-      // Start polling for progress updates (every 5 seconds)
+      // Start polling for progress updates (every 2-3 seconds as required)
+      // Frontend is read-only - fetch state from database
       const startPolling = () => {
         const interval = setInterval(async () => {
           try {
-            // fetchRepositoryAndDocs returns the status if docs exist
+            // fetchRepositoryAndDocs returns the status - read-only, no optimistic updates
             const status = await fetchRepositoryAndDocs();
             
             // Check if we should stop polling based on returned status
@@ -285,7 +314,7 @@ export default function ProjectDetail() {
             console.error('[REGENERATE] Polling error:', error);
             // Don't stop polling on error - might be temporary network issue
           }
-        }, 5000); // Poll every 5 seconds
+        }, 2500); // Poll every 2.5 seconds (2-3 second range)
         
         setPollingInterval(interval);
       };
@@ -293,7 +322,6 @@ export default function ProjectDetail() {
       startPolling();
     } catch (err) {
       console.error('[REGENERATE] Error:', err);
-      setDocsStatus('failed');
       setIsRegenerating(false); // Re-enable button on error
       
       const errorMessage = err instanceof Error ? err.message : 'Failed to regenerate documentation';

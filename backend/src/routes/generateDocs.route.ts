@@ -89,9 +89,34 @@ router.post('/generate-docs', verifyAuth, async (req: AuthenticatedRequest, res:
       });
     }
 
-    // Create or ensure placeholder row exists with initial 'generating' state
-    // This ensures the row exists before async generation starts
-    // The generateDocsForRepository function will update it atomically
+    // Load GitHub token from profiles BEFORE starting generation
+    // This ensures we fail fast if token is missing
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('github_access_token')
+      .eq('id', req.user.id)
+      .single();
+
+    if (profileError || !profile) {
+      console.warn('[GENERATE-DOCS] GitHub token not found:', {
+        userId: req.user.id,
+        error: profileError?.message
+      });
+      return res.status(400).json({
+        error: 'GitHub token not available',
+        message: 'Please reconnect your GitHub account in Settings'
+      });
+    }
+
+    if (!profile.github_access_token || profile.github_access_token.trim() === '') {
+      console.warn('[GENERATE-DOCS] GitHub token is empty:', { userId: req.user.id });
+      return res.status(400).json({
+        error: 'GitHub token not available',
+        message: 'Please reconnect your GitHub account in Settings'
+      });
+    }
+
+    // Set initial state atomically
     const now = new Date().toISOString();
     const { error: upsertError } = await supabase
       .from('generated_docs')
@@ -102,37 +127,34 @@ router.post('/generate-docs', verifyAuth, async (req: AuthenticatedRequest, res:
         setup_guide: null,
         architecture: null,
         version: '1.0.0',
-        status: 'generating', // Set immediately to prevent duplicate requests
+        status: 'generating',
         progress: 0,
-        current_step: 'Initializing...',
+        current_step: 'Starting generation',
         error_message: null,
-        generation_started_at: now, // Set timestamp for time-based locking
+        generation_started_at: now,
         updated_at: now
       }, {
         onConflict: 'repository_id'
       });
 
     if (upsertError) {
-      console.error('[GENERATE-DOCS] Failed to create placeholder:', upsertError);
-      // Continue anyway - generateDocsForRepository will handle state
-      // But log the error for debugging
-    } else {
-      console.log('[GENERATE-DOCS] Placeholder row created/updated with generating status');
+      console.error('[GENERATE-DOCS] Failed to set initial state:', upsertError);
+      return res.status(500).json({
+        error: 'Failed to initialize generation job',
+        message: upsertError.message
+      });
     }
 
-    // Start doc generation (async - don't wait)
+    console.log('[GENERATE-DOCS] Initial state set, starting background generation for:', repository_id);
+
+    // Start background generation (non-blocking)
+    // Do NOT await - return immediately
     generateDocsForRepository(repository_id).catch(err => {
-      console.error('[GENERATE-DOCS] Doc generation error:', err);
-      // Update status to failed
-      supabase
-        .from('generated_docs')
-        .update({ status: 'failed' })
-        .eq('repository_id', repository_id)
-        .catch(console.error);
+      console.error('[GENERATE-DOCS] Background generation error:', err);
+      // Error handling is done inside generateDocsForRepository
     });
 
-    console.log('[GENERATE-DOCS] Generation started for:', repository_id);
-
+    // Return immediately - do NOT block
     res.json({
       success: true,
       message: 'Documentation generation started',
