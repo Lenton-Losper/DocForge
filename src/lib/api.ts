@@ -160,3 +160,19 @@ export async function getRepositories() {
 
   return await response.json();
 }
+
+/**
+ * Delete user account and all associated data.
+ */
+export async function deleteAccount() {
+  const response = await authenticatedFetch('/api/account', {
+    method: 'DELETE',
+  });
+  
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || error.message || 'Failed to delete account');
+  }
+
+  return await response.json();
+}

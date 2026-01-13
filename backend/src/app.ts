@@ -1,4 +1,5 @@
 /** Express application setup. */
+import 'dotenv/config'; // Load environment variables FIRST, before any other imports
 import express from 'express';
 import cors from 'cors';
 import analyzeRoutes from './routes/analyze.route.js';
@@ -6,6 +7,7 @@ import docRoutes from './routes/doc.route.js';
 import documentsRoutes from './routes/documents.route.js';
 import repositoriesRoutes from './routes/repositories.route.js';
 import generateDocsRoutes from './routes/generateDocs.route.js';
+import accountRoutes from './routes/account.route.js';
 
 const app = express();
 
@@ -25,6 +27,7 @@ app.use('/api', docRoutes);
 app.use('/api', documentsRoutes);
 app.use('/api', repositoriesRoutes);
 app.use('/api', generateDocsRoutes);
+app.use('/api', accountRoutes);
 
 // Health check
 app.get('/health', (req, res) => {

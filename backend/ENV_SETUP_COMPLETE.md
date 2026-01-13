@@ -8,6 +8,7 @@ Create or update `backend/.env`:
 # Supabase Configuration
 SUPABASE_URL=https://afcgapmhwnxeposwbhdu.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=your-service-role-key-here
+SUPABASE_ANON_KEY=your-anon-key-here  # Required for auth middleware
 
 # OpenAI API (for AI documentation generation)
 OPENAI_API_KEY=your-openai-api-key-here
@@ -35,7 +36,7 @@ VITE_API_URL=http://localhost:8000
 2. Click **Settings** → **API**
 3. Copy:
    - **Project URL** → `SUPABASE_URL` / `VITE_SUPABASE_URL`
-   - **anon public** key → `VITE_SUPABASE_ANON_KEY`
+   - **anon public** key → `VITE_SUPABASE_ANON_KEY` (frontend) AND `SUPABASE_ANON_KEY` (backend auth)
    - **service_role** key → `SUPABASE_SERVICE_ROLE_KEY` (⚠️ Keep secret!)
 
 ### OpenAI API Key

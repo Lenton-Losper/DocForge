@@ -24,7 +24,9 @@ export default function Projects() {
   const [deleting, setDeleting] = useState<string | null>(null);
 
   useEffect(() => {
-    fetchRepositories();
+    fetchRepositories().catch(err => {
+      console.error('[PROJECTS] Error fetching repositories:', err);
+    });
   }, []);
 
   async function fetchRepositories() {
@@ -69,15 +71,20 @@ export default function Projects() {
         return;
       }
 
-      // Check if repo already exists
-      const { data: existing } = await supabase
+      // Check if repo already exists (array-safe query to avoid 406 errors)
+      const { data: existingArray, error: checkError } = await supabase
         .from('repositories')
         .select('id')
         .eq('user_id', user.id)
         .eq('github_id', repo.id.toString())
-        .single();
+        .limit(1);
 
-      if (existing) {
+      // Handle check error gracefully (not a fatal error)
+      if (checkError && checkError.code !== 'PGRST116') {
+        console.warn('Error checking for existing repository:', checkError);
+      }
+
+      if (existingArray && existingArray.length > 0) {
         alert('This repository is already connected');
         return;
       }

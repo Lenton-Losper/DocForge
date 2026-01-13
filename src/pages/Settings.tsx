@@ -1,16 +1,22 @@
 /** Settings page - Account and integration settings. */
 import { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase.js';
-import { Github, Trash2, LogOut, Check, AlertCircle, Loader2, LayoutDashboard, FolderOpen } from 'lucide-react';
+import { deleteAccount } from '../lib/api.js';
+import { Github, Trash2, LogOut, Check, AlertCircle, Loader2, LayoutDashboard, FolderOpen, X } from 'lucide-react';
 
 const Settings = () => {
   const { user, signOut } = useAuth();
+  const navigate = useNavigate();
   const [autoRegenerate, setAutoRegenerate] = useState(false);
   const [githubConnected, setGithubConnected] = useState(false);
   const [githubUsername, setGithubUsername] = useState('');
   const [connectingGitHub, setConnectingGitHub] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   // Check if GitHub is connected on mount
   useEffect(() => {
@@ -67,20 +73,55 @@ const Settings = () => {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       
-      if (session?.provider_token || session?.user?.identities?.some((id: any) => id.provider === 'github')) {
-        setGithubConnected(true);
-        setGithubUsername(
-          session.user.user_metadata?.user_name || 
-          session.user.email?.split('@')[0] || 
-          'Connected'
-        );
-        alert('GitHub connected successfully!');
-      } else {
-        console.warn('GitHub callback received but no provider token found');
+      if (!session?.user) {
+        console.warn('GitHub callback: No session found');
+        return;
       }
+
+      // Check if GitHub OAuth was successful
+      const hasGitHubIdentity = session.user?.identities?.some((id: any) => id.provider === 'github');
+      const providerToken = session.provider_token;
+
+      if (!hasGitHubIdentity && !providerToken) {
+        console.warn('GitHub callback received but no provider token or identity found');
+        return;
+      }
+
+      // Persist GitHub access token to profiles table
+      if (providerToken) {
+        const { error: upsertError } = await supabase
+          .from('profiles')
+          .upsert({
+            id: session.user.id,
+            github_access_token: providerToken,
+            updated_at: new Date().toISOString()
+          }, {
+            onConflict: 'id'
+          });
+
+        if (upsertError) {
+          console.error('Failed to persist GitHub token:', upsertError);
+          alert('GitHub connected, but failed to save token. Please try reconnecting.');
+          return;
+        }
+
+        // Only log in development (never in production)
+        if (import.meta.env.DEV) {
+          console.log('[GITHUB] Token persisted successfully');
+        }
+      }
+
+      // Update UI state
+      setGithubConnected(true);
+      setGithubUsername(
+        session.user.user_metadata?.user_name || 
+        session.user.email?.split('@')[0] || 
+        'Connected'
+      );
+      alert('GitHub connected successfully!');
     } catch (error) {
       console.error('Error handling GitHub callback:', error);
-      // Don't show error to user - just log it
+      alert('Failed to complete GitHub connection. Please try again.');
     }
   }
 
@@ -118,35 +159,29 @@ const Settings = () => {
       // Check if GitHub is actually connected
       const { data: { session } } = await supabase.auth.getSession();
       
-      if (!session) {
+      if (!session?.user) {
         // No session, just update UI
         setGithubConnected(false);
         setGithubUsername('');
         return;
       }
 
-      // Check if user has GitHub identity
-      const hasGitHubIdentity = session.user?.identities?.some(
-        (id: any) => id.provider === 'github'
-      ) || session.user?.app_metadata?.provider === 'github';
+      // Clear GitHub token from profiles table
+      const { error: updateError } = await supabase
+        .from('profiles')
+        .update({
+          github_access_token: null,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', session.user.id);
 
-      if (!hasGitHubIdentity && !session.provider_token) {
-        // GitHub not actually connected, just update UI
-        setGithubConnected(false);
-        setGithubUsername('');
+      if (updateError) {
+        console.error('Failed to clear GitHub token:', updateError);
+        alert('Failed to disconnect GitHub. Please try again.');
         return;
       }
 
-      // TODO: In production, call backend API to revoke GitHub token
-      // Example: await fetch('/api/github/disconnect', { method: 'POST' })
-      // The backend should:
-      // 1. Revoke the GitHub OAuth token via GitHub API
-      // 2. Remove provider_token from user metadata
-      // 3. Clear any stored GitHub tokens in database
-
-      // For now, just update UI state
-      // Note: This does NOT sign the user out - they remain logged in
-      // Only the GitHub connection is removed from UI
+      // Update UI state
       setGithubConnected(false);
       setGithubUsername('');
       
@@ -158,10 +193,44 @@ const Settings = () => {
   }
 
   const handleDeleteAccount = () => {
-    // TODO: Show confirmation modal and call backend API
-    if (confirm('Are you sure you want to delete your account? This action cannot be undone.')) {
-      console.log('Delete account');
+    setShowDeleteModal(true);
+    setDeleteConfirmText('');
+    setDeleteError(null);
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (deleteConfirmText !== 'DELETE') {
+      setDeleteError('Please type "DELETE" to confirm');
+      return;
     }
+
+    setIsDeleting(true);
+    setDeleteError(null);
+
+    try {
+      // Call backend API to delete account
+      await deleteAccount();
+
+      // Sign out user (clears local state)
+      await signOut();
+
+      // Redirect to landing page
+      navigate('/');
+    } catch (error) {
+      console.error('Account deletion failed:', error);
+      setDeleteError(
+        error instanceof Error 
+          ? error.message 
+          : 'Failed to delete account. Please try again or contact support.'
+      );
+      setIsDeleting(false);
+    }
+  };
+
+  const handleDeleteCancel = () => {
+    setShowDeleteModal(false);
+    setDeleteConfirmText('');
+    setDeleteError(null);
   };
 
   return (
@@ -310,12 +379,13 @@ const Settings = () => {
               <div>
                 <p className="font-semibold text-red-600">Delete Account</p>
                 <p className="text-sm text-[#57534E]">
-                  Permanently delete your account and all associated data
+                  Permanently delete your account and all associated data. This action cannot be undone.
                 </p>
               </div>
               <button
                 onClick={handleDeleteAccount}
-                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-all duration-200 inline-flex items-center space-x-2"
+                disabled={isDeleting}
+                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-all duration-200 inline-flex items-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <Trash2 className="w-4 h-4" />
                 <span>Delete Account</span>
@@ -324,6 +394,97 @@ const Settings = () => {
           </div>
         </div>
       </div>
+
+      {/* Delete Account Confirmation Modal */}
+      {showDeleteModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-2xl p-8 max-w-md w-full mx-4 border-2 border-red-200">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-2xl font-bold text-red-600">Delete Account</h2>
+              <button
+                onClick={handleDeleteCancel}
+                disabled={isDeleting}
+                className="text-[#57534E] hover:text-[#1C1917] transition-colors disabled:opacity-50"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4 mb-6">
+              <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                <div className="flex items-start gap-3">
+                  <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="font-semibold text-red-800 mb-2">This action is irreversible</p>
+                    <p className="text-sm text-red-700">
+                      All of your data will be permanently deleted, including:
+                    </p>
+                    <ul className="text-sm text-red-700 mt-2 list-disc list-inside space-y-1">
+                      <li>All uploaded documents</li>
+                      <li>All analysis results</li>
+                      <li>All repositories and connections</li>
+                      <li>All generated documentation</li>
+                      <li>Your profile and account settings</li>
+                      <li>Your authentication account</li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-[#1C1917] mb-2">
+                  Type <span className="font-mono font-bold text-red-600">DELETE</span> to confirm:
+                </label>
+                <input
+                  type="text"
+                  value={deleteConfirmText}
+                  onChange={(e) => {
+                    setDeleteConfirmText(e.target.value);
+                    setDeleteError(null);
+                  }}
+                  disabled={isDeleting}
+                  placeholder="DELETE"
+                  className="w-full px-4 py-3 border-2 border-[#E7E5E4] rounded-lg focus:border-red-600 focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed font-mono"
+                  autoFocus
+                />
+              </div>
+
+              {deleteError && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+                  <p className="text-sm text-red-700">{deleteError}</p>
+                </div>
+              )}
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={handleDeleteCancel}
+                disabled={isDeleting}
+                className="flex-1 px-4 py-3 border-2 border-[#E7E5E4] text-[#1C1917] rounded-lg hover:border-[#57534E] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDeleteConfirm}
+                disabled={isDeleting || deleteConfirmText !== 'DELETE'}
+                className="flex-1 px-4 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center justify-center gap-2"
+              >
+                {isDeleting ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Deleting...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-4 h-4" />
+                    <span>Delete Account</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

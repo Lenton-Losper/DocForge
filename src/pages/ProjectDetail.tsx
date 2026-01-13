@@ -14,24 +14,45 @@ import {
   AlertCircle
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
+import { 
+  GeneratedDocsRow, 
+  parseGenerationState, 
+  FrontendGenerationStatus 
+} from '../types/generation.js';
 
 export default function ProjectDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   
   const [repository, setRepository] = useState<any>(null);
-  const [docs, setDocs] = useState<any>(null);
+  const [docs, setDocs] = useState<GeneratedDocsRow | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeSection, setActiveSection] = useState('readme');
-  const [regenerating, setRegenerating] = useState(false);
+  const [isRegenerating, setIsRegenerating] = useState(false); // Local state to prevent spam
+  const [docsStatus, setDocsStatus] = useState<FrontendGenerationStatus>('not_started');
+  const [progress, setProgress] = useState(0);
+  const [currentStep, setCurrentStep] = useState<string>('');
+  const [pollingInterval, setPollingInterval] = useState<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     if (id) {
-      fetchRepositoryAndDocs();
+      // Wrap in catch to prevent unhandled promise rejections
+      fetchRepositoryAndDocs().catch(err => {
+        console.error('[PROJECT-DETAIL] Error fetching repository and docs:', err);
+        setLoading(false);
+      });
     }
+    
+    // Cleanup: Clear polling interval on unmount
+    return () => {
+      if (pollingInterval) {
+        clearInterval(pollingInterval);
+        setPollingInterval(null);
+      }
+    };
   }, [id]);
 
-  async function fetchRepositoryAndDocs() {
+  async function fetchRepositoryAndDocs(): Promise<FrontendGenerationStatus | undefined> {
     try {
       setLoading(true);
 
@@ -44,6 +65,7 @@ export default function ProjectDetail() {
 
       if (repoError || !repo) {
         console.error('Repository not found:', repoError);
+        setLoading(false);
         alert('Repository not found');
         navigate('/projects');
         return;
@@ -51,62 +73,231 @@ export default function ProjectDetail() {
 
       setRepository(repo);
 
-      // Fetch generated docs
-      const { data: generatedDocs, error: docsError } = await supabase
+      // ============================================================================
+      // Stable Query: Select all confirmed columns from generated_docs
+      // ============================================================================
+      // This query assumes the migration has been run.
+      // If columns don't exist, Supabase will return them as null/undefined,
+      // which our parser handles gracefully.
+      // 
+      // We use .limit(1) instead of .single() to avoid 406 errors when no row exists.
+      // This is array-safe and treats "no docs" as a normal state, not an error.
+      // ============================================================================
+      const { data: docsArray, error: docsError } = await supabase
         .from('generated_docs')
-        .select('*')
+        .select(`
+          id,
+          repository_id,
+          readme,
+          api_docs,
+          setup_guide,
+          architecture,
+          version,
+          generated_at,
+          updated_at,
+          status,
+          progress,
+          current_step,
+          error_message,
+          generation_started_at
+        `)
         .eq('repository_id', id)
-        .single();
+        .limit(1);
 
+      // ============================================================================
+      // Safe Parsing: Handle query results with graceful defaults
+      // ============================================================================
+      // The parser handles:
+      // - No row exists (docsArray is null or empty) → 'not_started' state
+      // - Row exists but status is null → infers from content
+      // - Progress is null → defaults to 0
+      // - All text fields null → defaults to empty strings
+      // ============================================================================
       if (docsError) {
-        console.error('Docs not found:', docsError);
-        // Docs might not be generated yet
-        setDocs(null);
-      } else {
-        setDocs(generatedDocs);
-      }
+        // Check if it's a "not found" error (expected when docs don't exist)
+        // Supabase error codes: PGRST116 = no rows, 406 = not acceptable
+        const isNotFoundError = 
+          docsError.code === 'PGRST116' || 
+          docsError.code === '406' ||
+          docsError.message?.includes('No rows') ||
+          docsError.message?.includes('not found');
+        
+        if (isNotFoundError) {
+          // Docs not generated yet - this is normal, not an error
+          // Use parser with null to get safe defaults
+          const parsed = parseGenerationState(null);
+          setDocs(null);
+          setDocsStatus(parsed.status);
+          setProgress(parsed.progress);
+          setCurrentStep(parsed.currentStep);
+          setLoading(false);
+          return parsed.status;
+        } else {
+          // Unexpected error - log but don't crash
+          console.warn('[FETCH] Unexpected error fetching docs:', docsError);
+          const parsed = parseGenerationState(null);
+          setDocs(null);
+          setDocsStatus(parsed.status);
+          setProgress(parsed.progress);
+          setCurrentStep(parsed.currentStep);
+          setLoading(false);
+          return parsed.status;
+        }
+      } else if (docsArray && docsArray.length > 0) {
+        // Row exists - parse it safely
+        const rawRow: GeneratedDocsRow = docsArray[0];
+        const parsed = parseGenerationState(rawRow);
+        
+        setDocs(rawRow);
+        setDocsStatus(parsed.status);
+        setProgress(parsed.progress);
+        setCurrentStep(parsed.currentStep);
 
-      setLoading(false);
+        // Re-enable regenerate button when status is completed or failed
+        if (parsed.status === 'complete' || parsed.status === 'failed') {
+          setIsRegenerating(false);
+          
+          // Stop polling if we have a final state
+          if (pollingInterval) {
+            clearInterval(pollingInterval);
+            setPollingInterval(null);
+          }
+        }
+        
+        setLoading(false);
+        // Return status for polling to check
+        return parsed.status;
+      } else {
+        // No row found - use parser defaults
+        const parsed = parseGenerationState(null);
+        setDocs(null);
+        setDocsStatus(parsed.status);
+        setProgress(parsed.progress);
+        setCurrentStep(parsed.currentStep);
+        
+        setLoading(false);
+        return parsed.status;
+      }
     } catch (error) {
       console.error('Error fetching data:', error);
+      setDocsStatus('failed');
       setLoading(false);
+      return 'failed';
     }
   }
 
   async function handleRegenerate() {
-    if (!confirm('Regenerate documentation? This will overwrite existing docs.')) {
+    // Prevent spam clicks - check local state AND backend status
+    if (isRegenerating || docsStatus === 'generating') {
+      console.warn('[REGENERATE] Generation already in progress or button locked');
+      return;
+    }
+
+    if (docsStatus === 'complete' && !confirm('Regenerate documentation? This will overwrite existing docs.')) {
       return;
     }
 
     try {
-      setRegenerating(true);
+      // Lock button immediately to prevent spam
+      setIsRegenerating(true);
+      setDocsStatus('generating');
+      setProgress(0);
+      setCurrentStep('Starting generation...');
 
-      const { data: { session } } = await supabase.auth.getSession();
+      // Get session and validate
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
       
-      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/generate-docs`, {
+      if (sessionError) {
+        console.error('[REGENERATE] Session error:', sessionError);
+        throw new Error('Failed to get session: ' + sessionError.message);
+      }
+
+      if (!session?.access_token) {
+        console.error('[REGENERATE] No access token in session');
+        throw new Error('Not authenticated. Please log in again.');
+      }
+
+      if (!id) {
+        console.error('[REGENERATE] No repository ID');
+        throw new Error('Repository ID is missing');
+      }
+
+      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+      const requestBody = { repository_id: id };
+
+      console.log('[REGENERATE] Sending request:', {
+        url: `${apiUrl}/api/generate-docs`,
+        method: 'POST',
+        hasToken: !!session.access_token,
+        repository_id: id
+      });
+
+      const response = await fetch(`${apiUrl}/api/generate-docs`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session?.access_token}`
+          'Authorization': `Bearer ${session.access_token}`
         },
-        body: JSON.stringify({ repository_id: id })
+        body: JSON.stringify(requestBody)
       });
 
+      // Parse response
+      const responseData = await response.json().catch(() => ({}));
+
       if (!response.ok) {
-        throw new Error('Failed to regenerate documentation');
+        console.error('[REGENERATE] Request failed:', {
+          status: response.status,
+          statusText: response.statusText,
+          data: responseData
+        });
+        
+        let errorMessage = 'Failed to regenerate documentation';
+        if (response.status === 400) {
+          errorMessage = responseData.error || 'Invalid request. Check repository ID.';
+        } else if (response.status === 401) {
+          errorMessage = 'Authentication failed. Please log in again.';
+        } else if (response.status === 404) {
+          errorMessage = 'Repository not found or access denied.';
+        } else if (response.status >= 500) {
+          errorMessage = 'Server error. Please try again later.';
+        }
+        
+        throw new Error(errorMessage);
       }
 
-      alert('Documentation is being regenerated! Refresh in a moment.');
-      
-      // Wait a bit then refresh
-      setTimeout(() => {
-        fetchRepositoryAndDocs();
-        setRegenerating(false);
-      }, 3000);
+      console.log('[REGENERATE] Generation started:', responseData);
+
+      // Start polling for progress updates (every 5 seconds)
+      const startPolling = () => {
+        const interval = setInterval(async () => {
+          try {
+            // fetchRepositoryAndDocs returns the status if docs exist
+            const status = await fetchRepositoryAndDocs();
+            
+            // Check if we should stop polling based on returned status
+            if (status === 'complete' || status === 'failed') {
+              clearInterval(interval);
+              setPollingInterval(null);
+              setIsRegenerating(false); // Re-enable button
+            }
+          } catch (error) {
+            // Handle errors in polling to prevent unhandled promise rejections
+            console.error('[REGENERATE] Polling error:', error);
+            // Don't stop polling on error - might be temporary network issue
+          }
+        }, 5000); // Poll every 5 seconds
+        
+        setPollingInterval(interval);
+      };
+
+      startPolling();
     } catch (err) {
-      console.error('Regenerate error:', err);
-      alert('Failed to regenerate documentation');
-      setRegenerating(false);
+      console.error('[REGENERATE] Error:', err);
+      setDocsStatus('failed');
+      setIsRegenerating(false); // Re-enable button on error
+      
+      const errorMessage = err instanceof Error ? err.message : 'Failed to regenerate documentation';
+      alert(errorMessage);
     }
   }
 
@@ -182,11 +373,12 @@ export default function ProjectDetail() {
           <div className="flex items-center gap-2">
             <button
               onClick={handleRegenerate}
-              disabled={regenerating}
-              className="px-4 py-2 text-white bg-[#F97316] hover:bg-[#EA580C] rounded-lg transition-all flex items-center gap-2 disabled:opacity-50"
+              disabled={isRegenerating || docsStatus === 'generating'}
+              className="px-4 py-2 text-white bg-[#F97316] hover:bg-[#EA580C] rounded-lg transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              title={docsStatus === 'generating' || isRegenerating ? 'Generation in progress...' : 'Regenerate documentation'}
             >
-              <RefreshCw className={`w-4 h-4 ${regenerating ? 'animate-spin' : ''}`} />
-              Regenerate Docs
+              <RefreshCw className={`w-4 h-4 ${isRegenerating || docsStatus === 'generating' ? 'animate-spin' : ''}`} />
+              {docsStatus === 'generating' || isRegenerating ? 'Generating...' : 'Regenerate Docs'}
             </button>
             <div className="relative group">
               <button className="px-4 py-2 text-[#57534E] hover:text-[#1C1917] hover:bg-[#F5F5F4] rounded-lg transition-all flex items-center gap-2">
@@ -245,19 +437,125 @@ export default function ProjectDetail() {
         {/* Documentation Content */}
         <div className="flex-1">
           <div className="bg-white rounded-xl border-2 border-[#E7E5E4] p-8">
-            {!docs ? (
+            {docsStatus === 'not_started' && (
+              <div className="text-center py-12">
+                <Loader2 className="w-12 h-12 text-[#F97316] animate-spin mx-auto mb-4" />
+                <h3 className="text-xl font-bold text-[#1C1917] mb-2">Documentation Not Started</h3>
+                <p className="text-[#57534E] mb-6">Documentation generation hasn't started yet.</p>
+                <button
+                  onClick={handleRegenerate}
+                  disabled={isRegenerating || docsStatus === 'generating'}
+                  className="bg-[#F97316] text-white px-6 py-3 rounded-lg hover:bg-[#EA580C] transition-all disabled:opacity-50 inline-flex items-center gap-2"
+                >
+                  <RefreshCw className={`w-4 h-4 ${isRegenerating || docsStatus === 'generating' ? 'animate-spin' : ''}`} />
+                  {isRegenerating || docsStatus === 'generating' ? 'Generating...' : 'Generate Documentation'}
+                </button>
+              </div>
+            )}
+
+            {docsStatus === 'generating' && (
               <div className="text-center py-12">
                 <Loader2 className="w-12 h-12 text-[#F97316] animate-spin mx-auto mb-4" />
                 <h3 className="text-xl font-bold text-[#1C1917] mb-2">Generating Documentation...</h3>
-                <p className="text-[#57534E]">This may take a minute. Please wait.</p>
+                
+                {/* Progress Bar */}
+                <div className="max-w-md mx-auto mb-4">
+                  <div className="w-full bg-[#E7E5E4] rounded-full h-3 mb-2">
+                    <div
+                      className="bg-[#F97316] h-3 rounded-full transition-all duration-300"
+                      style={{ width: `${progress}%` }}
+                    />
+                  </div>
+                  <div className="flex justify-between text-sm text-[#57534E]">
+                    <span>{progress}%</span>
+                    <span className="text-right">{currentStep || 'Processing...'}</span>
+                  </div>
+                </div>
+
+                <p className="text-[#57534E] mb-6">
+                  {currentStep || 'This may take 30-60 seconds. Please wait.'}
+                </p>
+                
                 <button
-                  onClick={() => fetchRepositoryAndDocs()}
-                  className="mt-6 text-[#F97316] hover:text-[#EA580C] underline"
+                  onClick={() => {
+                    fetchRepositoryAndDocs().catch(err => {
+                      console.error('[PROJECT-DETAIL] Error refreshing status:', err);
+                    });
+                  }}
+                  className="text-[#F97316] hover:text-[#EA580C] underline"
                 >
-                  Refresh
+                  Refresh Status
                 </button>
               </div>
-            ) : (
+            )}
+
+            {docsStatus === 'failed' && (
+              <div className="text-center py-12">
+                <AlertCircle className="w-12 h-12 text-[#EF4444] mx-auto mb-4" />
+                <h3 className="text-xl font-bold text-[#1C1917] mb-2">Documentation Generation Failed</h3>
+                {(() => {
+                  const parsed = parseGenerationState(docs);
+                  const isTokenError = parsed.errorMessage?.toLowerCase().includes('github token') || 
+                                      parsed.errorMessage?.toLowerCase().includes('reconnect');
+                  
+                  return parsed.errorMessage ? (
+                    <div className="max-w-md mx-auto mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+                      <p className="text-sm text-red-800">{parsed.errorMessage}</p>
+                      {isTokenError && (
+                        <Link
+                          to="/settings"
+                          className="mt-3 inline-block text-sm text-[#F97316] hover:text-[#EA580C] underline font-semibold"
+                        >
+                          Reconnect GitHub Account →
+                        </Link>
+                      )}
+                    </div>
+                  ) : null;
+                })()}
+                <p className="text-[#57534E] mb-6">
+                  {(() => {
+                    const parsed = parseGenerationState(docs);
+                    const isTokenError = parsed.errorMessage?.toLowerCase().includes('github token') || 
+                                        parsed.errorMessage?.toLowerCase().includes('reconnect');
+                    if (isTokenError) {
+                      return 'Please reconnect your GitHub account in Settings and try again.';
+                    }
+                    return parsed.errorMessage 
+                      ? 'Please fix the issue and try again.' 
+                      : 'There was an error generating the documentation.';
+                  })()}
+                </p>
+                {(() => {
+                  const parsed = parseGenerationState(docs);
+                  const isTokenError = parsed.errorMessage?.toLowerCase().includes('github token') || 
+                                      parsed.errorMessage?.toLowerCase().includes('reconnect');
+                  
+                  if (isTokenError) {
+                    return (
+                      <Link
+                        to="/settings"
+                        className="bg-[#F97316] text-white px-6 py-3 rounded-lg hover:bg-[#EA580C] transition-all inline-flex items-center gap-2"
+                      >
+                        Go to Settings
+                      </Link>
+                    );
+                  }
+                  
+                  return (
+                    <button
+                      onClick={handleRegenerate}
+                      disabled={isRegenerating || docsStatus === 'generating'}
+                      className="bg-[#F97316] text-white px-6 py-3 rounded-lg hover:bg-[#EA580C] transition-all disabled:opacity-50 inline-flex items-center gap-2"
+                    >
+                      <RefreshCw className={`w-4 h-4 ${isRegenerating ? 'animate-spin' : ''}`} />
+                      {isRegenerating ? 'Retrying...' : 'Retry Generation'}
+                    </button>
+                  );
+                })()}
+              </div>
+            )}
+
+            {docsStatus === 'complete' && docs && (
               <div className="prose prose-slate max-w-none">
                 <ReactMarkdown>
                   {sections.find(s => s.id === activeSection)?.content || '# No content available'}

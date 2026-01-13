@@ -29,8 +29,53 @@ const Dashboard = () => {
   const [connecting, setConnecting] = useState(false);
 
   useEffect(() => {
-    fetchRepositories();
+    fetchRepositories().catch(err => {
+      console.error('[DASHBOARD] Error fetching repositories:', err);
+    });
+    // Handle GitHub OAuth callback after login redirect
+    // Wrap in catch to prevent unhandled promise rejections
+    handleGitHubTokenPersistence().catch(err => {
+      console.error('[DASHBOARD] Unhandled error in token persistence:', err);
+    });
   }, []);
+
+  // Persist GitHub token after OAuth redirect
+  async function handleGitHubTokenPersistence() {
+    try {
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      
+      if (sessionError) {
+        console.warn('[DASHBOARD] Session error (non-fatal):', sessionError);
+        return;
+      }
+      
+      if (!session?.user || !session.provider_token) {
+        return; // No token to persist
+      }
+
+      // Persist GitHub access token to profiles table
+      const { error: upsertError } = await supabase
+        .from('profiles')
+        .upsert({
+          id: session.user.id,
+          github_access_token: session.provider_token,
+          updated_at: new Date().toISOString()
+        }, {
+          onConflict: 'id'
+        });
+
+      if (upsertError) {
+        console.error('[DASHBOARD] Failed to persist GitHub token:', upsertError);
+        // Don't show error to user - token might already be persisted
+      } else if (import.meta.env.DEV) {
+        console.log('[DASHBOARD] GitHub token persisted successfully');
+      }
+    } catch (error) {
+      // Catch all errors to prevent unhandled promise rejections
+      console.error('[DASHBOARD] Error persisting GitHub token:', error);
+      // Silent fail - don't interrupt user flow
+    }
+  }
 
   async function fetchRepositories() {
     try {
@@ -142,7 +187,9 @@ const Dashboard = () => {
       await generateDocs(data.id);
       
       // Refresh repositories list
-      fetchRepositories();
+      fetchRepositories().catch(err => {
+        console.error('[DASHBOARD] Error refreshing repositories:', err);
+      });
       
       // Navigate to project detail
       navigate(`/projects/${data.id}`);

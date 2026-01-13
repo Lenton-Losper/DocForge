@@ -1,0 +1,103 @@
+{
+  "version": "1.0.0",
+  "sections": [
+    {
+      "id": "project_overview",
+      "title": "Project Overview",
+      "required": true,
+      "ai_allowed": true,
+      "evidence_requirements": [
+        "README.md",
+        "package.json",
+        "description in repository metadata"
+      ],
+      "description": "Project name, purpose, and high-level description"
+    },
+    {
+      "id": "installation",
+      "title": "Installation & Setup",
+      "required": true,
+      "ai_allowed": true,
+      "evidence_requirements": [
+        "package.json",
+        ".env.example",
+        "requirements.txt",
+        "setup scripts"
+      ],
+      "description": "How to install and configure the project"
+    },
+    {
+      "id": "usage",
+      "title": "Usage & Examples",
+      "required": true,
+      "ai_allowed": true,
+      "evidence_requirements": [
+        "main entry point files",
+        "exported functions/classes",
+        "CLI commands",
+        "example files"
+      ],
+      "description": "How to use the project with examples"
+    },
+    {
+      "id": "api_reference",
+      "title": "API Reference",
+      "required": false,
+      "ai_allowed": true,
+      "evidence_requirements": [
+        "exported functions",
+        "class definitions",
+        "type definitions",
+        "API route definitions"
+      ],
+      "description": "Documentation of public APIs, functions, and classes"
+    },
+    {
+      "id": "architecture",
+      "title": "Architecture & Design",
+      "required": false,
+      "ai_allowed": true,
+      "evidence_requirements": [
+        "folder structure",
+        "main files",
+        "configuration files"
+      ],
+      "description": "System architecture and design patterns"
+    },
+    {
+      "id": "testing",
+      "title": "Testing",
+      "required": false,
+      "ai_allowed": false,
+      "evidence_requirements": [
+        "test files",
+        "test configuration",
+        "test scripts in package.json"
+      ],
+      "description": "How to run tests"
+    },
+    {
+      "id": "contributing",
+      "title": "Contributing",
+      "required": false,
+      "ai_allowed": false,
+      "evidence_requirements": [
+        "CONTRIBUTING.md",
+        ".github/CONTRIBUTING.md"
+      ],
+      "description": "Guidelines for contributors"
+    },
+    {
+      "id": "license",
+      "title": "License",
+      "required": false,
+      "ai_allowed": false,
+      "evidence_requirements": [
+        "LICENSE",
+        "LICENSE.md",
+        "license field in package.json"
+      ],
+      "description": "Project license information"
+    }
+  ]
+}
