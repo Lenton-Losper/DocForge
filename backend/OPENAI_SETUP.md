@@ -14,7 +14,7 @@ SUPABASE_URL=https://afcgapmhwnxeposwbhdu.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 
 # OpenAI API (for AI documentation generation)
-OPENAI_API_KEY=sk-proj-your-openai-api-key-here
+OPENAI_API_KEY=your-openai-api-key-here
 
 # Optional: Personal GitHub token as fallback
 GITHUB_TOKEN=optional-fallback-token

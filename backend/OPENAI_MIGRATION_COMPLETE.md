@@ -30,7 +30,7 @@ Create `backend/.env` with:
 ```bash
 SUPABASE_URL=https://afcgapmhwnxeposwbhdu.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
-OPENAI_API_KEY=sk-proj-your-openai-api-key-here
+OPENAI_API_KEY=your-openai-api-key-here
 ```
 
 ### 2. Install Dependencies

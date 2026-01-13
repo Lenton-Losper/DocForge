@@ -61,7 +61,7 @@ Your `backend/.env` should contain:
 ```env
 SUPABASE_URL=https://afcgapmhwnxeposwbhdu.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=your-service-role-key-here
-OPENAI_API_KEY=sk-proj-your-openai-api-key-here
+OPENAI_API_KEY=your-openai-api-key-here
 ```
 
 ### Step 3: Run Environment Checker
