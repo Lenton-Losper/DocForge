@@ -6,13 +6,11 @@ import TwoPathSection from '../components/TwoPathSection';
 import Preview from '../components/Preview';
 import Footer from '../components/Footer';
 import SignUpModal from '../components/SignUpModal';
-import { useAuth } from '../contexts/AuthContext';
-
 const Landing = () => {
   const [isSignUpModalOpen, setIsSignUpModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<'signup' | 'login'>('signup');
   const [actionType, setActionType] = useState<'upload' | 'github' | undefined>();
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isAnalyzing] = useState(false);
 
   const handleLoginClick = () => {
     setModalMode('login');

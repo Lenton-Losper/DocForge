@@ -1,19 +1,10 @@
 /** Dashboard page - Overview of repositories and documentation. */
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Github, FileText, Clock, Plus, Loader2, Settings, Folder, FolderOpen, LogOut, GitBranch, ArrowRight, Lock } from 'lucide-react';
+import { FileText, Clock, Plus, Loader2, Settings, Folder, LogOut, GitBranch, ArrowRight, Lock } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase.js';
 import { RepositoryPicker } from '../components/RepositoryPicker';
-
-interface Project {
-  id: string;
-  name: string;
-  owner: string;
-  lastSync: string;
-  status: 'up-to-date' | 'needs-refresh';
-  docCount: number;
-}
 
 const Dashboard = () => {
   const { user, signOut } = useAuth();

@@ -66,11 +66,6 @@ async function apiRequest<T>(
       });
       // Normalize backend AI errors into a structured object the UI can surface cleanly
       const errorMessage = json.detail || json.message || json.error || `Request failed with status ${response.status}`;
-      const structured = {
-        error: json.error || 'AI_GENERATION_FAILED',
-        message: errorMessage,
-        details: json.details || {}
-      };
       throw new Error(errorMessage);
     }
 

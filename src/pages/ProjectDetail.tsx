@@ -46,7 +46,7 @@ export default function ProjectDetail() {
   const [ollamaChecking, setOllamaChecking] = useState(true);
   const [showImprovedReadme, setShowImprovedReadme] = useState(false);
   const [improvedContent, setImprovedContent] = useState('');
-  const [aiError, setAiError] = useState<string | null>(null);
+  const [, setAiError] = useState<string | null>(null);
   const [realReadmeContent, setRealReadmeContent] = useState<string>('');
   
   // Test mode for known repositories
@@ -1162,8 +1162,6 @@ MIT`;
     { id: 'architecture', label: 'Architecture', icon: Box, content: docs?.architecture }
   ];
 
-  const currentSection = sections.find(s => s.id === activeSection);
-
   return (
     <div className="min-h-screen bg-[#FAFAF9]">
       {/* Header */}
@@ -1485,11 +1483,11 @@ MIT`;
                 <p className="text-[#57534E] mb-6">Documentation generation hasn't started yet.</p>
                 <button
                   onClick={handleRegenerate}
-                  disabled={isRegenerating || docsStatus === 'generating'}
+                  disabled={isRegenerating}
                   className="bg-[#F97316] text-white px-6 py-3 rounded-lg hover:bg-[#EA580C] transition-all disabled:opacity-50 inline-flex items-center gap-2"
                 >
-                  <RefreshCw className={`w-4 h-4 ${isRegenerating || docsStatus === 'generating' ? 'animate-spin' : ''}`} />
-                  {isRegenerating || docsStatus === 'generating' ? 'Generating...' : 'Generate Documentation'}
+                  <RefreshCw className={`w-4 h-4 ${isRegenerating ? 'animate-spin' : ''}`} />
+                  {isRegenerating ? 'Generating...' : 'Generate Documentation'}
                 </button>
               </div>
             )}
@@ -1585,7 +1583,7 @@ MIT`;
                   return (
                     <button
                       onClick={handleRegenerate}
-                      disabled={isRegenerating || docsStatus === 'generating'}
+                      disabled={isRegenerating}
                       className="bg-[#F97316] text-white px-6 py-3 rounded-lg hover:bg-[#EA580C] transition-all disabled:opacity-50 inline-flex items-center gap-2"
                     >
                       <RefreshCw className={`w-4 h-4 ${isRegenerating ? 'animate-spin' : ''}`} />

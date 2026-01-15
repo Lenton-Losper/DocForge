@@ -27,7 +27,7 @@ const SignUpModal = ({
 
   async function signInWithGitHub() {
     try {
-      const { data, error } = await supabase.auth.signInWithOAuth({
+      const { error } = await supabase.auth.signInWithOAuth({
         provider: 'github',
         options: {
           scopes: 'repo read:user',

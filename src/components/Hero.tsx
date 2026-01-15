@@ -1,4 +1,3 @@
-import { useRef } from 'react';
 import { Upload, Github, Check, Loader2 } from 'lucide-react';
 
 interface HeroProps {
