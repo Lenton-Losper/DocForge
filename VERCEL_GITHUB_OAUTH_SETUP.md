@@ -17,6 +17,9 @@ Your Vercel deployment URL should look like:
 
 **Find it in:**
 - Vercel Dashboard → Your Project → Deployments → Click on a deployment → Copy the URL
+- Or check: `vercel ls` in terminal
+
+**⚠️ IMPORTANT:** Use your **production domain** (not preview URLs). If you have a custom domain, use that.
 
 ---
 
@@ -32,22 +35,25 @@ Your Vercel deployment URL should look like:
 
 3. **Update Site URL:**
    - **Site URL:** Change from `http://localhost:5173` to your Vercel production URL
-   - Example: `https://docforge.vercel.app`
+   - Example: `https://docforge.vercel.app` or `https://docforge-one.vercel.app`
+   - ⚠️ **Use the exact domain from your Vercel deployment**
 
 4. **Add Redirect URLs:**
    - Click **"Add URL"** button
-   - Add each of these URLs (one at a time):
+   - Add each of these URLs **one at a time** (replace `your-vercel-domain` with your actual domain):
      ```
      https://your-vercel-domain.vercel.app/dashboard
      https://your-vercel-domain.vercel.app/settings?github=connected
      https://your-vercel-domain.vercel.app
      ```
+   - ⚠️ **No trailing slashes!** Use exact URLs as shown above
    - **Keep the localhost URLs too** (for local development):
      ```
      http://localhost:5173/dashboard
      http://localhost:5173/settings?github=connected
      http://localhost:5173
      ```
+   - ⚠️ **Make sure ALL URLs are added** - Supabase will only redirect to URLs in this list
 
 5. **Click "Save"**
 
