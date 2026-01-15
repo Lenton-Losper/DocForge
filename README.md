@@ -1,6 +1,8 @@
 # DocDocs
 
-A modern SaaS platform for AI-powered documentation analysis and generation.
+DocDocs is a developer tool that analyzes GitHub repositories and generates structured documentation including README summaries, API references, setup guides, and architecture overviews.
+
+The project explores the intersection of static code analysis and AI-assisted documentation to reduce onboarding friction in unfamiliar codebases.
 
 ## 🚀 Quick Start
 
