@@ -101,24 +101,24 @@ export function extractEvidence(repoStructure: RepoStructure, repoOwner: string,
   });
   evidence.meta.languages = Array.from(languageSet);
 
-  // Scan files for evidence
+  // Scan files for evidence - track all discovered files
+  const discoveredFilePaths = new Set<string>();
   repoStructure.files.forEach(file => {
+    discoveredFilePaths.add(file.path);
     const path = file.path.toLowerCase();
     const fileName = file.path.split('/').pop()?.toLowerCase() || '';
 
-    // File existence checks
+    // File existence checks - exact matches for critical files
     if (path.includes('readme')) evidence.files.hasReadme = true;
-    if (fileName === 'package.json') evidence.files.hasPackageJson = true;
-    if (fileName === '.env.example' || fileName === 'env.example') evidence.files.hasEnvExample = true;
-    if (fileName === 'dockerfile' || fileName === 'docker-compose.yml') evidence.files.hasDocker = true;
-    if (path.includes('test') || path.includes('spec')) evidence.files.hasTests = true;
-    if (fileName === '.gitignore') evidence.files.hasGitignore = true;
-    if (fileName === 'license' || fileName === 'license.txt' || fileName === 'license.md') evidence.files.hasLicense = true;
-
-    // Extract package.json data
-    if (fileName === 'package.json') {
+    
+    // CRITICAL: package.json detection must be exact
+    if (fileName === 'package.json' || path === 'package.json') {
+      evidence.files.hasPackageJson = true;
+      
+      // Extract package.json data - use repoStructure.packageJson if available (more reliable)
       try {
-        const pkg = JSON.parse(file.content);
+        // Prefer repoStructure.packageJson if available (already parsed)
+        const pkg = repoStructure.packageJson || JSON.parse(file.content);
         if (pkg.name) evidence.meta.name = pkg.name;
         if (pkg.description) evidence.meta.description = pkg.description;
         if (pkg.version) evidence.meta.version = pkg.version;
@@ -160,6 +160,16 @@ export function extractEvidence(repoStructure: RepoStructure, repoOwner: string,
         // Invalid JSON - skip
       }
     }
+    
+    if (fileName === '.env.example' || fileName === 'env.example') evidence.files.hasEnvExample = true;
+    if (fileName === 'dockerfile' || fileName === 'docker-compose.yml' || fileName === 'docker-compose.yaml') {
+      evidence.files.hasDocker = true;
+    }
+    if (path.includes('test') || path.includes('spec')) evidence.files.hasTests = true;
+    if (fileName === '.gitignore') evidence.files.hasGitignore = true;
+    if (fileName === 'license' || fileName === 'license.txt' || fileName === 'license.md') {
+      evidence.files.hasLicense = true;
+    }
 
     // API evidence
     if (path.includes('/api/') || path.includes('/routes/') || path.includes('/controllers/')) {
@@ -199,9 +209,53 @@ export function extractEvidence(repoStructure: RepoStructure, repoOwner: string,
     }
   });
 
+  // SAFEGUARD: If package.json exists in repoStructure, it MUST be detected
+  if (repoStructure.packageJson && !evidence.files.hasPackageJson) {
+    console.warn('[EVIDENCE] WARNING: package.json exists in repoStructure but not detected in files!');
+    // Force detection to prevent contradiction
+    evidence.files.hasPackageJson = true;
+    
+    // Also extract data from repoStructure.packageJson if not already extracted
+    if (!evidence.meta.name && repoStructure.packageJson) {
+      const pkg = repoStructure.packageJson;
+      if (pkg.name) evidence.meta.name = pkg.name;
+      if (pkg.description) evidence.meta.description = pkg.description;
+      if (pkg.version) evidence.meta.version = pkg.version;
+      if (pkg.license) evidence.meta.license = pkg.license;
+      if (pkg.scripts) evidence.scripts = Object.keys(pkg.scripts);
+      if (pkg.dependencies) evidence.dependencies = Object.keys(pkg.dependencies);
+      if (pkg.devDependencies) evidence.devDependencies = Object.keys(pkg.devDependencies);
+    }
+  }
+
+  // SAFEGUARD: If package.json is detected, it MUST exist in discovered files
+  if (evidence.files.hasPackageJson && !discoveredFilePaths.has('package.json') && 
+      !Array.from(discoveredFilePaths).some(p => p.toLowerCase().endsWith('/package.json'))) {
+    console.warn('[EVIDENCE] WARNING: package.json detected but not in discovered files!');
+  }
+
   // Remove duplicates
   evidence.apiEvidence.routes = [...new Set(evidence.apiEvidence.routes)];
   evidence.structure.folders = [...new Set(evidence.structure.folders)];
+
+  // FINAL SAFEGUARD: Ensure tech stack detection is backed by file evidence
+  // If we detect Node.js/TypeScript/JavaScript but no package.json, that's a contradiction
+  const hasNodeEvidence = evidence.meta.languages.some(l => 
+    ['Node.js', 'JavaScript', 'TypeScript'].includes(l)
+  );
+  if (hasNodeEvidence && !evidence.files.hasPackageJson) {
+    console.warn('[EVIDENCE] WARNING: Detected Node.js/JS/TS but no package.json - this may be incorrect');
+    // Don't remove the language detection, but log the inconsistency
+  }
+
+  // If package.json exists, we should have detected Node.js/JavaScript/TypeScript
+  if (evidence.files.hasPackageJson && !hasNodeEvidence) {
+    // Add Node.js if package.json exists but no JS/TS files found
+    if (evidence.meta.languages.length === 0) {
+      evidence.meta.languages.push('Node.js');
+      console.log('[EVIDENCE] Added Node.js based on package.json presence');
+    }
+  }
 
   return evidence;
 }

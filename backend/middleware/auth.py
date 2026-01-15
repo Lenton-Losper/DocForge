@@ -5,14 +5,25 @@ from supabase import create_client, Client
 import os
 from typing import Optional
 
-# Initialize Supabase client for JWT verification
-supabase_url = os.getenv("SUPABASE_URL")
-supabase_service_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+# Lazy initialization of Supabase client
+_supabase_client: Optional[Client] = None
 
-if not supabase_url or not supabase_service_key:
-    raise ValueError("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY environment variables")
-
-supabase: Client = create_client(supabase_url, supabase_service_key)
+def get_supabase_client() -> Client:
+    """Get or create Supabase client (lazy initialization)."""
+    global _supabase_client
+    if _supabase_client is None:
+        supabase_url = os.getenv("SUPABASE_URL")
+        supabase_service_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+        
+        if not supabase_url or not supabase_service_key:
+            raise ValueError(
+                "Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY environment variables. "
+                "Please create a .env file in the backend directory with these variables."
+            )
+        
+        _supabase_client = create_client(supabase_url, supabase_service_key)
+    
+    return _supabase_client
 
 security = HTTPBearer()
 
@@ -35,7 +46,8 @@ async def get_current_user(
     token = credentials.credentials
     
     try:
-        # Verify token with Supabase
+        # Verify token with Supabase (lazy initialization)
+        supabase = get_supabase_client()
         user_response = supabase.auth.get_user(token)
         
         if user_response.user is None:

@@ -26,7 +26,7 @@ export async function analyzeRepository(
   const octokit = new Octokit({ auth: githubToken });
 
   try {
-    // 1. Get repository tree
+    // 1. Get repository tree from root
     const { data: repoData } = await octokit.repos.get({ owner, repo });
     const { data: tree } = await octokit.git.getTree({
       owner,
@@ -35,25 +35,57 @@ export async function analyzeRepository(
       recursive: '1'
     });
 
-    // 2. Filter relevant files
+    // Log all discovered files for tracking
+    const allDiscoveredFiles = tree.tree
+      .filter(item => item.type === 'blob' && item.path)
+      .map(item => item.path!);
+    console.log(`[REPO_SCAN] Discovered ${allDiscoveredFiles.length} total files in repository`);
+
+    // 2. Filter relevant files - ensure package.json is ALWAYS included if it exists
     const relevantExtensions = ['.ts', '.tsx', '.js', '.jsx', '.py', '.java', '.go', '.rb'];
     const configFiles = ['package.json', 'requirements.txt', 'pom.xml', 'go.mod'];
     const docFiles = ['README.md', 'README.rst'];
 
+    // First, check if package.json exists in the tree
+    const packageJsonPath = allDiscoveredFiles.find(path => 
+      path.toLowerCase() === 'package.json' || path.toLowerCase().endsWith('/package.json')
+    );
+
+    // Build list of files to fetch
     const filesToFetch = tree.tree.filter(item => {
-      if (item.type !== 'blob') return false;
-      const ext = item.path?.split('.').pop();
+      if (item.type !== 'blob' || !item.path) return false;
+      const ext = item.path.split('.').pop()?.toLowerCase();
       return (
-        relevantExtensions.some(e => item.path?.endsWith(e)) ||
-        configFiles.some(c => item.path?.includes(c)) ||
-        docFiles.some(d => item.path?.includes(d))
+        relevantExtensions.some(e => item.path!.toLowerCase().endsWith(e)) ||
+        configFiles.some(c => item.path!.toLowerCase().includes(c.toLowerCase())) ||
+        docFiles.some(d => item.path!.toLowerCase().includes(d.toLowerCase()))
       );
-    }).slice(0, 50); // Limit to 50 files to avoid rate limits
+    });
+
+    // CRITICAL: If package.json exists, ensure it's in the fetch list
+    if (packageJsonPath && !filesToFetch.some(f => f.path === packageJsonPath)) {
+      const pkgItem = tree.tree.find(item => item.path === packageJsonPath);
+      if (pkgItem) {
+        filesToFetch.unshift(pkgItem); // Add to beginning for priority
+        console.log(`[REPO_SCAN] Added package.json to fetch list: ${packageJsonPath}`);
+      }
+    }
+
+    // Limit to 50 files but prioritize config files
+    const prioritizedFiles = filesToFetch.sort((a, b) => {
+      const aIsConfig = configFiles.some(c => a.path?.toLowerCase().includes(c.toLowerCase()));
+      const bIsConfig = configFiles.some(c => b.path?.toLowerCase().includes(c.toLowerCase()));
+      if (aIsConfig && !bIsConfig) return -1;
+      if (!aIsConfig && bIsConfig) return 1;
+      return 0;
+    }).slice(0, 50);
 
     // 3. Fetch file contents
     const files: FileContent[] = [];
-    for (const file of filesToFetch) {
-      if (!file.path) continue;
+    const fetchedPaths = new Set<string>(); // Track what we've fetched to avoid duplicates
+
+    for (const file of prioritizedFiles) {
+      if (!file.path || fetchedPaths.has(file.path)) continue;
 
       try {
         const { data: fileData } = await octokit.repos.getContent({
@@ -73,22 +105,38 @@ export async function analyzeRepository(
               type: file.path.split('.').pop() || 'unknown',
               size: fileData.size
             });
+            fetchedPaths.add(file.path);
           }
         }
       } catch (err) {
-        console.error(`Failed to fetch ${file.path}:`, err);
+        console.error(`[REPO_SCAN] Failed to fetch ${file.path}:`, err);
       }
     }
 
-    // 4. Extract package.json
+    // Log what we fetched
+    console.log(`[REPO_SCAN] Successfully fetched ${files.length} files`);
+    if (packageJsonPath) {
+      const pkgFound = files.some(f => f.path === packageJsonPath);
+      console.log(`[REPO_SCAN] package.json exists: ${pkgFound ? 'YES (fetched)' : 'NO (not found in files)'}`);
+    }
+
+    // 4. Extract package.json - MUST be present if it exists in tree
     let packageJson = null;
-    const pkgFile = files.find(f => f.path.includes('package.json'));
+    const pkgFile = files.find(f => {
+      const path = f.path.toLowerCase();
+      return path === 'package.json' || path.endsWith('/package.json');
+    });
+    
     if (pkgFile) {
       try {
         packageJson = JSON.parse(pkgFile.content);
+        console.log(`[REPO_SCAN] Successfully parsed package.json`);
       } catch (e) {
-        console.error('Failed to parse package.json');
+        console.error('[REPO_SCAN] Failed to parse package.json:', e);
       }
+    } else if (packageJsonPath) {
+      // SAFEGUARD: If package.json exists in tree but wasn't fetched, log warning
+      console.warn(`[REPO_SCAN] WARNING: package.json exists in tree (${packageJsonPath}) but was not fetched!`);
     }
 
     // 5. Extract README
@@ -98,15 +146,32 @@ export async function analyzeRepository(
       readme = readmeFile.content;
     }
 
-    // 6. Detect languages
-    const hasTypeScript = files.some(f => f.type === 'ts' || f.type === 'tsx');
-    const hasJavaScript = files.some(f => f.type === 'js' || f.type === 'jsx');
-    const hasPython = files.some(f => f.type === 'py');
+    // 6. Detect languages - ONLY from actual file evidence
+    const hasTypeScript = files.some(f => {
+      const ext = f.path.split('.').pop()?.toLowerCase();
+      return ext === 'ts' || ext === 'tsx';
+    });
+    const hasJavaScript = files.some(f => {
+      const ext = f.path.split('.').pop()?.toLowerCase();
+      return ext === 'js' || ext === 'jsx';
+    });
+    const hasPython = files.some(f => {
+      const ext = f.path.split('.').pop()?.toLowerCase();
+      return ext === 'py';
+    });
 
+    // Language detection must be backed by file evidence
     let mainLanguage = 'Unknown';
-    if (hasTypeScript) mainLanguage = 'TypeScript';
-    else if (hasJavaScript) mainLanguage = 'JavaScript';
-    else if (hasPython) mainLanguage = 'Python';
+    if (hasTypeScript) {
+      mainLanguage = 'TypeScript';
+      console.log(`[REPO_SCAN] Detected TypeScript (evidence: .ts/.tsx files)`);
+    } else if (hasJavaScript) {
+      mainLanguage = 'JavaScript';
+      console.log(`[REPO_SCAN] Detected JavaScript (evidence: .js/.jsx files)`);
+    } else if (hasPython) {
+      mainLanguage = 'Python';
+      console.log(`[REPO_SCAN] Detected Python (evidence: .py files)`);
+    }
 
     return {
       files,
@@ -118,7 +183,7 @@ export async function analyzeRepository(
       mainLanguage
     };
   } catch (error) {
-    console.error('Repository analysis error:', error);
+    console.error('[REPO_SCAN] Repository analysis error:', error);
     throw new Error('Failed to analyze repository');
   }
 }

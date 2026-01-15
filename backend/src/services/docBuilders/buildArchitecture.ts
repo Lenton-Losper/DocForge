@@ -190,18 +190,22 @@ export function buildArchitecture(evidence: RepoEvidence): string {
     sections.push(`\n`);
   }
 
-  // Missing Architecture Information
-  const missingItems: string[] = [];
-  if (evidence.structure.folders.length === 0) missingItems.push('Clear directory structure');
-  if (evidence.structure.entryFiles.length === 0) missingItems.push('Entry point files');
+  // Optional Architecture Improvements
+  const optionalItems: string[] = [];
+  if (evidence.structure.folders.length === 0) {
+    optionalItems.push('Clear directory structure (improves code organization)');
+  }
+  if (evidence.structure.entryFiles.length === 0) {
+    optionalItems.push('Entry point files (clarifies application startup)');
+  }
   if (!evidence.files.hasPackageJson && (evidence.meta.languages.includes('JavaScript') || evidence.meta.languages.includes('TypeScript'))) {
-    missingItems.push('Package configuration');
+    optionalItems.push('Package configuration (required for Node.js projects)');
   }
 
-  if (missingItems.length > 0) {
-    sections.push(`## Missing Architecture Components ❌\n\n`);
+  if (optionalItems.length > 0) {
+    sections.push(`## ⚠️ Optional Improvements Detected\n\n`);
     sections.push(`The following components would improve architecture documentation:\n\n`);
-    missingItems.forEach(item => {
+    optionalItems.forEach(item => {
       sections.push(`- ${item}\n`);
     });
     sections.push(`\n`);

@@ -4,7 +4,9 @@ import { createClient } from '@supabase/supabase-js';
 import { Octokit } from '@octokit/rest';
 import { analyzeRepository, RepoStructure } from './repositoryAnalyzer.js';
 import { analyzeEvidence, SectionAnalysis } from './evidenceAnalyzer.js';
+import { extractEvidence } from './evidenceExtractor.js';
 import { updateJob } from './jobStateManager.js';
+import { generateApiDiagram, generateArchitectureDiagram, generateFolderStructureDiagram } from './mermaidGenerator.js';
 import { openai } from '../config/openai.js';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
@@ -127,23 +129,55 @@ export async function generateAuditDocsForRepository(
     });
     console.log(`[GENERATION] Step 2: Fetching file contents...`);
 
+    // Log all discovered files for tracking
+    const allDiscoveredFiles = tree.tree
+      .filter(item => item.type === 'blob' && item.path)
+      .map(item => item.path!);
+    console.log(`[AUDIT_GEN] Discovered ${allDiscoveredFiles.length} total files in repository`);
+
     const relevantExtensions = ['.ts', '.tsx', '.js', '.jsx', '.py', '.java', '.go', '.rb'];
     const configFiles = ['package.json', 'requirements.txt', 'pom.xml', 'go.mod'];
     const docFiles = ['README.md', 'README.rst'];
 
+    // First, check if package.json exists in the tree
+    const packageJsonPath = allDiscoveredFiles.find(path => 
+      path.toLowerCase() === 'package.json' || path.toLowerCase().endsWith('/package.json')
+    );
+
+    // Build list of files to fetch
     const filesToFetch = tree.tree.filter(item => {
-      if (item.type !== 'blob') return false;
-      const ext = item.path?.split('.').pop();
+      if (item.type !== 'blob' || !item.path) return false;
+      const ext = item.path.split('.').pop()?.toLowerCase();
       return (
-        relevantExtensions.some(e => item.path?.endsWith(e)) ||
-        configFiles.some(c => item.path?.includes(c)) ||
-        docFiles.some(d => item.path?.includes(d))
+        relevantExtensions.some(e => item.path!.toLowerCase().endsWith(e)) ||
+        configFiles.some(c => item.path!.toLowerCase().includes(c.toLowerCase())) ||
+        docFiles.some(d => item.path!.toLowerCase().includes(d.toLowerCase()))
       );
+    });
+
+    // CRITICAL: If package.json exists, ensure it's in the fetch list
+    if (packageJsonPath && !filesToFetch.some(f => f.path === packageJsonPath)) {
+      const pkgItem = tree.tree.find(item => item.path === packageJsonPath);
+      if (pkgItem) {
+        filesToFetch.unshift(pkgItem); // Add to beginning for priority
+        console.log(`[AUDIT_GEN] Added package.json to fetch list: ${packageJsonPath}`);
+      }
+    }
+
+    // Limit to 50 files but prioritize config files
+    const prioritizedFiles = filesToFetch.sort((a, b) => {
+      const aIsConfig = configFiles.some(c => a.path?.toLowerCase().includes(c.toLowerCase()));
+      const bIsConfig = configFiles.some(c => b.path?.toLowerCase().includes(c.toLowerCase()));
+      if (aIsConfig && !bIsConfig) return -1;
+      if (!aIsConfig && bIsConfig) return 1;
+      return 0;
     }).slice(0, 50);
 
     const files: Array<{ path: string; content: string; type: string; size: number }> = [];
-    for (const file of filesToFetch) {
-      if (!file.path) continue;
+    const fetchedPaths = new Set<string>(); // Track what we've fetched
+
+    for (const file of prioritizedFiles) {
+      if (!file.path || fetchedPaths.has(file.path)) continue;
       try {
         const { data: fileData } = await octokit.repos.getContent({
           owner: repo.repo_owner,
@@ -159,11 +193,18 @@ export async function generateAuditDocsForRepository(
               type: file.path.split('.').pop() || 'unknown',
               size: fileData.size
             });
+            fetchedPaths.add(file.path);
           }
         }
       } catch (err) {
-        console.error(`Failed to fetch ${file.path}:`, err);
+        console.error(`[AUDIT_GEN] Failed to fetch ${file.path}:`, err);
       }
+    }
+
+    console.log(`[AUDIT_GEN] Successfully fetched ${files.length} files`);
+    if (packageJsonPath) {
+      const pkgFound = files.some(f => f.path === packageJsonPath);
+      console.log(`[AUDIT_GEN] package.json exists: ${pkgFound ? 'YES (fetched)' : 'NO (not found in files)'}`);
     }
 
     // ============================================================================
@@ -175,14 +216,23 @@ export async function generateAuditDocsForRepository(
     });
     console.log(`[GENERATION] Step 3: Analyzing codebase structure...`);
 
+    // Extract package.json - MUST be present if it exists in tree
     let packageJson = null;
-    const pkgFile = files.find(f => f.path.includes('package.json'));
+    const pkgFile = files.find(f => {
+      const path = f.path.toLowerCase();
+      return path === 'package.json' || path.endsWith('/package.json');
+    });
+    
     if (pkgFile) {
       try {
         packageJson = JSON.parse(pkgFile.content);
+        console.log(`[AUDIT_GEN] Successfully parsed package.json`);
       } catch (e) {
-        console.error('Failed to parse package.json');
+        console.error('[AUDIT_GEN] Failed to parse package.json:', e);
       }
+    } else if (packageJsonPath) {
+      // SAFEGUARD: If package.json exists in tree but wasn't fetched, log warning
+      console.warn(`[AUDIT_GEN] WARNING: package.json exists in tree (${packageJsonPath}) but was not fetched!`);
     }
 
     let readme = null;
@@ -191,14 +241,45 @@ export async function generateAuditDocsForRepository(
       readme = readmeFile.content;
     }
 
+    // Detect languages - ONLY from actual file evidence
+    const hasTypeScript = files.some(f => {
+      const ext = f.path.split('.').pop()?.toLowerCase();
+      return ext === 'ts' || ext === 'tsx';
+    });
+    const hasJavaScript = files.some(f => {
+      const ext = f.path.split('.').pop()?.toLowerCase();
+      return ext === 'js' || ext === 'jsx';
+    });
+    const hasPython = files.some(f => {
+      const ext = f.path.split('.').pop()?.toLowerCase();
+      return ext === 'py';
+    });
+
+    // Language detection must be backed by file evidence
+    let mainLanguage = 'Unknown';
+    if (hasTypeScript) {
+      mainLanguage = 'TypeScript';
+      console.log(`[AUDIT_GEN] Detected TypeScript (evidence: .ts/.tsx files)`);
+    } else if (hasJavaScript) {
+      mainLanguage = 'JavaScript';
+      console.log(`[AUDIT_GEN] Detected JavaScript (evidence: .js/.jsx files)`);
+    } else if (hasPython) {
+      mainLanguage = 'Python';
+      console.log(`[AUDIT_GEN] Detected Python (evidence: .py files)`);
+    } else if (packageJson) {
+      // Fallback: if package.json exists but no language files, assume Node.js
+      mainLanguage = packageJson.type === 'module' ? 'JavaScript' : 'TypeScript';
+      console.log(`[AUDIT_GEN] Inferred ${mainLanguage} from package.json (no language files found)`);
+    }
+
     const repoStructure: RepoStructure = {
       files: files.map(f => ({ path: f.path, content: f.content, type: f.type, size: f.size })),
       packageJson,
       readme,
-      hasTypeScript: files.some(f => f.path.endsWith('.ts') || f.path.endsWith('.tsx')),
-      hasJavaScript: files.some(f => f.path.endsWith('.js') || f.path.endsWith('.jsx')),
-      hasPython: files.some(f => f.path.endsWith('.py')),
-      mainLanguage: packageJson?.type === 'module' ? 'JavaScript' : 'TypeScript'
+      hasTypeScript,
+      hasJavaScript,
+      hasPython,
+      mainLanguage
     };
 
     if (!repoStructure.files || repoStructure.files.length === 0) {
@@ -403,7 +484,10 @@ export async function generateAuditDocsForRepository(
     });
     console.log(`[GENERATION] Step 8: Saving documentation to database...`);
     
-    const markdownDocs = convertToMarkdown(result);
+    // Extract evidence for suggested improvements (deterministic, no AI)
+    const evidence = extractEvidence(repoStructure, repo.repo_owner, repo.repo_name);
+    
+    const markdownDocs = convertToMarkdown(result, evidence);
     
     // Save docs with status
     const { error: upsertError } = await supabase
@@ -609,7 +693,7 @@ Generate markdown content for this section.`;
   }
 }
 
-function convertToMarkdown(result: DocumentationResult): {
+function convertToMarkdown(result: DocumentationResult, evidence?: any): {
   readme: string;
   api: string;
   setup: string;
@@ -620,10 +704,73 @@ function convertToMarkdown(result: DocumentationResult): {
   const setupSection = result.sections.find(s => s.id === 'installation');
   const archSection = result.sections.find(s => s.id === 'architecture');
 
+  let readmeContent = readmeSection?.content || '# Project Overview\n\n*Documentation generation in progress...*';
+  
+  // Add "Suggested Improvements" section at the top if evidence is available
+  if (evidence) {
+    const suggestions: string[] = [];
+    
+    // Detect gaps and create actionable suggestions
+    if (!evidence.meta?.description) {
+      suggestions.push('Add a project description to `package.json` to improve overview quality');
+    }
+    
+    if (!evidence.files?.hasLicense) {
+      suggestions.push('Add a LICENSE file to clarify usage rights');
+    }
+    
+    if (!evidence.files?.hasTests) {
+      suggestions.push('Add basic test files to improve project maturity');
+    }
+    
+    if (!evidence.files?.hasReadme) {
+      suggestions.push('Create a README.md file with project information');
+    }
+    
+    if (!evidence.files?.hasEnvExample && (evidence.files?.hasPackageJson || evidence.stack?.backend)) {
+      suggestions.push('Add a `.env.example` file to document required environment variables');
+    }
+    
+    if (!evidence.files?.hasGitignore) {
+      suggestions.push('Add a `.gitignore` file to exclude unnecessary files from version control');
+    }
+
+    if (suggestions.length > 0) {
+      const suggestionsSection = `## Suggested Improvements (Auto-detected)\n\n${suggestions.map((s, i) => `${i + 1}. ${s}`).join('\n')}\n\n---\n\n`;
+      readmeContent = suggestionsSection + readmeContent;
+    }
+  }
+
+  // Generate API documentation with Mermaid diagram
+  let apiContent = apiSection?.content || '# API Reference\n\n';
+  if (evidence) {
+    const apiDiagram = generateApiDiagram(evidence);
+    apiContent = `# API Reference\n\n## Architecture Diagram\n\n\`\`\`mermaid\n${apiDiagram.content}\n\`\`\`\n\n*${apiDiagram.description}*\n\n---\n\n${apiSection?.content || '*No API routes detected. Add API routes to see them documented here.*'}`;
+  } else {
+    apiContent += '*No API documentation available*';
+  }
+
+  // Generate Architecture documentation with Mermaid diagrams
+  let archContent = archSection?.content || '# Architecture\n\n';
+  if (evidence) {
+    const archDiagram = generateArchitectureDiagram(evidence);
+    const folderDiagram = generateFolderStructureDiagram(evidence);
+    
+    archContent = `# Architecture\n\n## System Architecture\n\n\`\`\`mermaid\n${archDiagram.content}\n\`\`\`\n\n*${archDiagram.description}*\n\n`;
+    
+    if (folderDiagram) {
+      archContent += `## Folder Structure\n\n\`\`\`mermaid\n${folderDiagram.content}\n\`\`\`\n\n*${folderDiagram.description}*\n\n---\n\n`;
+    }
+    
+    archContent += archSection?.content || '*Architecture documentation based on detected structure.*';
+  } else {
+    archContent += '*Architecture documentation not available*';
+  }
+
   return {
-    readme: readmeSection?.content || '# Project Overview\n\n*Documentation generation in progress...*',
-    api: apiSection?.content || '# API Reference\n\n*No API documentation available*',
+    readme: readmeContent,
+    api: apiContent,
     setup: setupSection?.content || '# Installation & Setup\n\n*Setup instructions not available*',
-    architecture: archSection?.content || '# Architecture\n\n*Architecture documentation not available*'
+    architecture: archContent
   };
 }
